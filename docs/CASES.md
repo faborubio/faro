@@ -46,14 +46,32 @@ Formato de cada caso: **síntoma observado**, **por qué pasa**, **cómo lo trat
 - **Cómo lo trata Faro:** el refresco diario (ADR-003) captura el valor vigente; la hora exacta de
   publicación de la CMF aún no está caracterizada → si el refresco corre antes de la publicación,
   traerá el del día anterior (aceptable: el dato sigue siendo el último oficial). Caracterizar la
-  hora en Fase 1 con `sync_runs` reales antes de fijar la hora del ticker.
+  hora con `sync_runs` reales antes de fijar la hora del ticker.
+- **Dato (2026-07-09):** a las 16:08 hora de Chile los valores del día ya estaban publicados. El
+  ticker v1 corre cada `REFRESH_INTERVAL` desde el boot (sin hora fija); con el servicio deployado
+  (Fase 2), `sync_runs` acumulará la evidencia para decidir si conviene anclar la hora.
 
-## CASE-002 — Día no hábil / valor aún no publicado *(pendiente de datos reales)*
+## CASE-002 — Día no hábil / valor aún no publicado *(mecanismo verificado; fin de semana pendiente)*
 - **Síntoma esperado:** fines de semana, feriados o el corte diario antes de publicación → la fuente
   puede no traer valor nuevo (o traer el último vigente).
 - **Por qué pasa:** los mercados/entidades no publican en días no hábiles.
-- **Cómo lo tratará Faro:** por confirmar en Fase 1 — el `sync_run` debe distinguir "sin cambios" de
-  "fallo". Documentar el comportamiento exacto observado aquí antes de ajustar el scheduler.
+- **Cómo lo trata Faro (verificado 2026-07-09):** el `sync_run` **sí distingue** "sin cambios" de
+  "fallo": el segundo refresco real del mismo día trajo los 4 valores ya conocidos y cerró
+  `status='ok', indicators_updated=0` — el upsert afecta 0 filas cuando `(código, fecha, valor)` ya
+  existe idéntico (`IS DISTINCT FROM` en la query). Ese es exactamente el comportamiento esperado
+  para un fin de semana (la CMF re-sirve el último valor vigente). Queda pendiente **observar** un
+  fin de semana/feriado real en `sync_runs` para confirmar que la CMF no hace algo distinto (p. ej.
+  devolver vacío, que hoy cerraría el run en 'error' por "no trajo valores").
+
+## CASE-005 — Un IPC de 0,0% es un valor legítimo, no dato faltante
+- **Síntoma observado (2026-07-09):** la CMF entrega `"Valor": "0,0"` para el IPC de junio 2026; en
+  la base y en la API queda `value = 0`.
+- **Por qué pasa:** la variación mensual del IPC puede ser exactamente 0,0% — es un dato real, no
+  una ausencia. Verificado contra la respuesta cruda de la API.
+- **Cómo lo trata Faro:** `0` viaja como cualquier otro valor (parseo, NUMERIC, JSON). Regla para el
+  futuro: **jamás usar 0 como centinela de "sin dato"** — la ausencia se modela con la ausencia de
+  fila, y `store.ErrNotFound`/404 en la API. Las alertas (Fase 3) deben comparar contra umbrales sin
+  tratar 0 como caso especial.
 
 ---
 

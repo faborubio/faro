@@ -10,8 +10,14 @@ pago** (cómo y cuándo se salda).
 ---
 
 ## AUD-001 — Verificar la cadencia real de los indicadores con datos en vivo
-- **Estado:** abierta (se resuelve en Fase 1). El **diseño** ya está decidido en **ADR-011**
-  (campo `cadence` en el catálogo); esta entrada cubre solo la **verificación empírica**.
+- **Estado:** **pagada** (Fase 1, 2026-07-09). **Hallazgo:** el primer refresco real confirmó el
+  modelo de ADR-011 sin ajustes — `dolar` y `uf` llegaron con fecha del día (2026-07-09), `utm`
+  con un valor mensual fechado al 1° del mes (2026-07-01) e `ipc` ídem (2026-06-01: el IPC de un
+  mes se publica al mes siguiente). El segundo refresco del día cerró `ok` con 0 actualizados —
+  `sync_runs` distingue "sin cambios" de "fallo" (ver CASE-002). Sorpresa documentada aparte: el
+  IPC puede valer 0,0% legítimamente (CASE-005). El enum `daily`/`monthly` queda como está.
+- El **diseño** ya estaba decidido en **ADR-011** (campo `cadence` en el catálogo); esta entrada
+  cubría solo la **verificación empírica**.
 - **Contexto:** ADR-011 modela `daily`/`monthly` y la CMF confirma la cadencia oficial (dólar/euro
   días hábiles; IPC/UF/UTM mensual ~día 9, CASE-001), pero el comportamiento exacto de la **CMF**
   (fuente v1) ante días no hábiles y valores no publicados aún no está verificado con datos reales
@@ -36,13 +42,29 @@ pago** (cómo y cuándo se salda).
   aplicación al arrancar (idempotente vía `schema_migrations`, mismo contrato del script).
 
 ## AUD-003 — Respuesta de la CMF limitada a 1 MB en el adapter
-- **Estado:** abierta (revisar en Fase 1).
+- **Estado:** abierta (revisar cuando entre el backfill).
 - **Contexto:** `doOnce` lee el cuerpo con `io.LimitReader(1<<20)`. Para el valor vigente sobra
-  (≈100 bytes), pero el backfill de histórico (Fase 1: `/uf/2025`, series anuales) puede acercarse
+  (≈100 bytes), pero el backfill de histórico (`/uf/2025`, series anuales) puede acercarse
   al límite o requerir paginación.
 - **Atajo aceptado:** límite fijo simple mientras el adapter solo trae valores vigentes.
-- **Plan de pago:** al implementar el backfill histórico en Fase 1, medir el tamaño real de las
+  **Nota (cierre Fase 1):** el backfill quedó **fuera** de la Fase 1 — el histórico se acumula
+  refresco a refresco desde el deploy. El backfill entra cuando el dashboard (Fase 2) necesite
+  series hacia atrás para los gráficos.
+- **Plan de pago:** al implementar el backfill histórico, medir el tamaño real de las
   series anuales y subir el límite o paginar por año según evidencia (CASES primero).
+
+## AUD-004 — sync_runs huérfanos en 'running' ante un crash duro
+- **Estado:** abierta (revisar en Fase 2, con el deploy).
+- **Contexto:** un `sync_run` se abre en `'running'` y se cierra al final del ciclo. El apagado
+  ordenado está cubierto (SIGTERM en pleno refresco cierra el run igual, vía
+  `context.WithoutCancel` — con test). Pero un **crash duro** (OOM del free tier, kill -9, caída
+  de la máquina) deja el run en `'running'` para siempre.
+- **Atajo aceptado:** sin barrido al boot; a esta escala un run huérfano es ruido cosmético en el
+  tablero de salud, no corrompe datos (el próximo ciclo abre su propio run y el upsert es
+  idempotente).
+- **Plan de pago:** en Fase 2 (primer deploy real, donde el OOM es plausible), decidir: barrido
+  on-boot (`UPDATE sync_runs SET status='error', error='huérfano' WHERE status='running'`) o
+  umbral de frescura en el tablero. Calibrar con evidencia de `sync_runs` reales.
 
 ---
 

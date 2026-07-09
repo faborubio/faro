@@ -87,7 +87,9 @@ func (r *Refresher) RefreshOnce(ctx context.Context) error {
 		status = store.SyncError
 		msg = runErr.Error()
 	}
-	if err := r.store.FinishSyncRun(ctx, id, status, changed, msg); err != nil {
+	// Cerrar el run aunque el contexto muera a mitad del ciclo (SIGTERM en
+	// pleno refresco): si no, queda huérfano en 'running' para siempre.
+	if err := r.store.FinishSyncRun(context.WithoutCancel(ctx), id, status, changed, msg); err != nil {
 		return errors.Join(runErr, err)
 	}
 

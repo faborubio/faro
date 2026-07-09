@@ -40,6 +40,7 @@ type finishCall struct {
 	status  store.SyncStatus
 	updated int
 	errMsg  string
+	ctxErr  error // estado del contexto al momento de cerrar el run
 }
 
 type fakeStore struct {
@@ -76,7 +77,7 @@ func (f *fakeStore) StartSyncRun(ctx context.Context, source string) (int64, err
 func (f *fakeStore) FinishSyncRun(ctx context.Context, id int64, status store.SyncStatus, updated int, errMsg string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.finished = append(f.finished, finishCall{id: id, status: status, updated: updated, errMsg: errMsg})
+	f.finished = append(f.finished, finishCall{id: id, status: status, updated: updated, errMsg: errMsg, ctxErr: ctx.Err()})
 	return nil
 }
 
@@ -180,6 +181,40 @@ func TestRefreshOnceSinBDNoLlamaALaFuente(t *testing.T) {
 	}
 	if src.callCount() != 0 {
 		t.Errorf("la fuente se llamó %d veces sin BD donde persistir, quiero 0", src.callCount())
+	}
+}
+
+// cancelingSource cancela el contexto durante Fetch: simula un SIGTERM que
+// llega en pleno refresco.
+type cancelingSource struct {
+	cancel context.CancelFunc
+}
+
+func (c *cancelingSource) Fetch(ctx context.Context) ([]indicator.Snapshot, error) {
+	c.cancel()
+	return nil, ctx.Err()
+}
+
+func (c *cancelingSource) Name() string { return "cancelador" }
+
+func TestRefreshOnceCierraElRunAunqueElContextoMuera(t *testing.T) {
+	// SIGTERM a mitad del ciclo: el sync_run debe cerrarse igual (con
+	// contexto vivo), no quedar huérfano en 'running'.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	src := &cancelingSource{cancel: cancel}
+	st := &fakeStore{}
+	r := New(src, st, 0, nil)
+
+	if err := r.RefreshOnce(ctx); err == nil {
+		t.Fatal("fetch abortado por el contexto: quiero error")
+	}
+	fin := st.lastFinish(t)
+	if fin.status != store.SyncError {
+		t.Errorf("status = %q, quiero error", fin.status)
+	}
+	if fin.ctxErr != nil {
+		t.Errorf("FinishSyncRun corrió con contexto muerto (%v): el cierre del run debe sobrevivir al shutdown", fin.ctxErr)
 	}
 }
 
