@@ -32,7 +32,9 @@ Existen el SAD (1.2.0), este CLAUDE.md y los docs compañeros día-1 (`docs/AUDI
    VibeNest, confirmado. Sin gates verdes, no se construye.
 1. **Instalar Go ✓** — `go1.26.5 linux/amd64` en `~/.local/go` (sin sudo, checksum verificado),
    PATH en `~/.bashrc` (incluye `~/go/bin` para herramientas). Verificado con build+run real.
-2. `go mod init` (módulo `github.com/faborubio/faro` o similar), estructura de paquetes.
+2. **Scaffold ✓** — módulo `github.com/faborubio/faro`; `cmd/faro` (main placeholder) +
+   `internal/indicator` (dominio: `Snapshot`, `Cadence` ADR-011, interfaz `IndicatorSource` ADR-002,
+   con test). Build/vet/test verdes.
 3. Postgres + migraciones (tablas `indicators`, `indicator_values`, `alerts`, `sync_runs` — §6 del SAD).
 4. Adapter `CMF` (impl de `IndicatorSource`, ADR-002; una llamada por indicador, API key vía ENV) con
    tests `httptest` (cero red real).
