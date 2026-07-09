@@ -1,0 +1,17 @@
+# Secretos / entorno local (ADR-009: config por ENV, nada de secretos en el repo)
+.env
+*.env
+!.env.example
+
+# Binarios / build de Go
+/bin/
+/faro
+*.exe
+
+# Tests / cobertura
+*.out
+coverage.*
+
+# SO / editor
+.DS_Store
+*.swp
