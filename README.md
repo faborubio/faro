@@ -9,8 +9,8 @@ de la fuente oficial (CMF), histórico, alertas por webhook y widgets embebibles
 > Un faro guía por su luz: valores de referencia que en Chile se consultan a diario, servidos
 > rápido, con histórico y desde la fuente autoritativa.
 
-**Estado: 🚧 Fase 0 — Cimientos (en construcción).** El diseño está completo y los gates de
-viabilidad verificados; el código se está construyendo fase a fase. Ver [roadmap](#roadmap).
+**Estado: 🚧 Fase 1 — Núcleo (en construcción).** Cimientos cerrados: adapter CMF testeado
+(datos reales verificados end-to-end), esquema en Postgres y CI verde. Ver [roadmap](#roadmap).
 
 ---
 
@@ -57,8 +57,8 @@ El diseño completo — 11 ADRs con sus trade-offs — vive en **[SAD-Faro.md](S
 
 | Fase | Entrega | Estado |
 |---|---|---|
-| **0 — Cimientos** | gates (legal ✓ · API key ✓ · viabilidad ✓) · scaffold · Postgres · adapter CMF testeado · CI | 🚧 en curso |
-| **1 — Núcleo** | scheduler + histórico + API (actual e histórico) + cache | ⏳ |
+| **0 — Cimientos** | gates (legal · API key · viabilidad) · scaffold · Postgres · adapter CMF testeado · CI | ✅ |
+| **1 — Núcleo** | scheduler + histórico + API (actual e histórico) + cache | 🚧 siguiente |
 | **2 — Dashboard + deploy** | Chart.js embebido · Dockerfile · **URL pública viva** | ⏳ |
 | **3 — Distribución** | alertas webhook · widgets embebibles · rate limiting · CORS | ⏳ |
 | **4 — Robustez** *(solo con tracción)* | fallback mindicador.cl/BCCh · OpenAPI · métricas | ⏳ |

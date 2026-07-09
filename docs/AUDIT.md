@@ -24,4 +24,26 @@ pago** (cómo y cuándo se salda).
 
 ---
 
-*Sin más deuda abierta. Cada atajo nuevo entra aquí antes de darse por aceptado.*
+## AUD-002 — Migraciones solo aplicables con script local (psql)
+- **Estado:** abierta (se paga en Fase 2, con el deploy).
+- **Contexto:** las migraciones corren con `scripts/migrate.sh` (bash + psql) contra `DATABASE_URL`.
+  Funciona para desarrollo, pero el deploy en VibeNest (ADR-008) necesita un mecanismo que corra
+  donde no hay psql ni shell garantizados.
+- **Atajo aceptado:** en Fase 0–1 no hay producción, así que el script basta; se pospone la decisión
+  del mecanismo de prod (embeber migraciones en el binario y aplicarlas al boot, o un job de deploy).
+- **Plan de pago:** decidir e implementar en **Fase 2** junto con el Dockerfile, y documentarlo en
+  `docs/DEPLOY.md` (que nace en esa fase). Candidato natural: `//go:embed` de `migrations/` +
+  aplicación al arrancar (idempotente vía `schema_migrations`, mismo contrato del script).
+
+## AUD-003 — Respuesta de la CMF limitada a 1 MB en el adapter
+- **Estado:** abierta (revisar en Fase 1).
+- **Contexto:** `doOnce` lee el cuerpo con `io.LimitReader(1<<20)`. Para el valor vigente sobra
+  (≈100 bytes), pero el backfill de histórico (Fase 1: `/uf/2025`, series anuales) puede acercarse
+  al límite o requerir paginación.
+- **Atajo aceptado:** límite fijo simple mientras el adapter solo trae valores vigentes.
+- **Plan de pago:** al implementar el backfill histórico en Fase 1, medir el tamaño real de las
+  series anuales y subir el límite o paginar por año según evidencia (CASES primero).
+
+---
+
+*Cada atajo nuevo entra aquí antes de darse por aceptado.*

@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -177,13 +178,20 @@ func (e entry) snapshot(code string) (indicator.Snapshot, error) {
 	return indicator.Snapshot{Code: code, Value: v, Date: d}, nil
 }
 
+// clNumberRe valida el formato numérico chileno ESTRICTO: entero con grupos
+// de miles de exactamente 3 dígitos separados por punto (o sin puntos), y
+// decimales tras una coma. Rechazar lo ambiguo es deliberado (CASE-003): si
+// la CMF cambiara a punto decimal ("12.34"), convertir a la chilena daría
+// 1234 — un valor silenciosamente corrupto. Mejor fallar ruidosamente.
+var clNumberRe = regexp.MustCompile(`^-?(?:\d+|\d{1,3}(?:\.\d{3})+)(?:,\d+)?$`)
+
 // parseCLNumber convierte el formato numérico chileno de la CMF a float64:
 // punto = separador de miles, coma = separador decimal (CASE-003).
 // "40.842,07" → 40842.07 · "71.649" → 71649 · "0,0" → 0.
 func parseCLNumber(s string) (float64, error) {
 	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, errors.New("valor vacío")
+	if !clNumberRe.MatchString(s) {
+		return 0, errors.New("no es un número en formato chileno")
 	}
 	s = strings.ReplaceAll(s, ".", "")
 	s = strings.ReplaceAll(s, ",", ".")

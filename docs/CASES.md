@@ -34,6 +34,19 @@ Formato de cada caso: **síntoma observado**, **por qué pasa**, **cómo lo trat
   no perder precisión en montos). **Esto se cubre con tests de mapeo** (§10 del SAD) usando estas
   respuestas grabadas. Un cambio de formato de la fuente debe romper un test, no producir un valor
   silenciosamente mal.
+- **Refinamiento (ronda crítica, cierre Fase 0):** el parseo es **estricto** (`clNumberRe`): los
+  grupos de miles deben ser de exactamente 3 dígitos. Un `"12.34"` (punto decimal, formato
+  internacional) **falla ruidosamente** en vez de convertirse en `1234` — la corrupción silenciosa
+  era posible con el reemplazo ingenuo de puntos. Cubierto con tests negativos.
+
+## CASE-004 — La API de la CMF publica el valor del día el mismo día
+- **Síntoma observado (2026-07-09):** fixtures capturadas el 07-08 traían UF/dólar con fecha 07-08;
+  la verificación e2e del día siguiente trajo UF `40.844,79` y dólar `935,71` con fecha **07-09**.
+- **Por qué pasa:** la CMF publica los indicadores diarios durante la mañana del mismo día.
+- **Cómo lo trata Faro:** el refresco diario (ADR-003) captura el valor vigente; la hora exacta de
+  publicación de la CMF aún no está caracterizada → si el refresco corre antes de la publicación,
+  traerá el del día anterior (aceptable: el dato sigue siendo el último oficial). Caracterizar la
+  hora en Fase 1 con `sync_runs` reales antes de fijar la hora del ticker.
 
 ## CASE-002 — Día no hábil / valor aún no publicado *(pendiente de datos reales)*
 - **Síntoma esperado:** fines de semana, feriados o el corte diario antes de publicación → la fuente

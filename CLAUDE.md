@@ -22,33 +22,27 @@ Chart.js embebido con `go:embed` · Docker (imagen mínima) · Deploy en VibeNes
 disciplina de fases heredadas de Oteo/FleetPilot.
 
 ## Estado actual
-**Fase 0 — Cimientos: EN CURSO.** Repo público en `github.com/faborubio/faro` (remote HTTPS).
-Existen el SAD (1.2.0), este CLAUDE.md y los docs compañeros día-1 (`docs/AUDIT.md`, `docs/CASES.md`,
-`docs/TROUBLESHOOTING.md`). Progreso — gates antes de código (El Método §4):
-0. **Gates.** (a) **Legal ✓:** resuelto — fuente v1 = **CMF oficial** (ToS clara vía API key),
-   mindicador.cl como fallback (ADR-002 enmendado). (b) **API key ✓:** obtenida y verificada con
-   `scripts/smoke-cmf.sh` (UF/dólar/UTM/IPC responden). Vive en `.env` (gitignored, ADR-009).
-   (c) **Viabilidad ✓:** Go instalable sin sudo (tarball `linux-amd64` → `~/.local`) + free tier
-   VibeNest, confirmado. Sin gates verdes, no se construye.
-1. **Instalar Go ✓** — `go1.26.5 linux/amd64` en `~/.local/go` (sin sudo, checksum verificado),
-   PATH en `~/.bashrc` (incluye `~/go/bin` para herramientas). Verificado con build+run real.
-2. **Scaffold ✓** — módulo `github.com/faborubio/faro`; `cmd/faro` (main placeholder) +
-   `internal/indicator` (dominio: `Snapshot`, `Cadence` ADR-011, interfaz `IndicatorSource` ADR-002,
-   con test). Build/vet/test verdes.
-3. **Postgres + migraciones ✓** — dev en Docker (`scripts/dev-db.sh`, contenedor `faro-pg`,
-   postgres:17-alpine, volumen `faro-pgdata`); migraciones SQL numeradas + runner
-   (`scripts/migrate.sh`, registro en `schema_migrations`, 1 transacción por archivo). Las 4 tablas
-   del SAD §6 + catálogo sembrado con `cadence` (ADR-011). Verificado: constraint de cadencia,
-   upsert idempotente.
-4. **Adapter `CMF` ✓** — `internal/source/cmf` (impl de `IndicatorSource`, ADR-002): una llamada por
-   indicador, reintentos con backoff en 5xx (no en 4xx), fallas parciales devuelven lo obtenido +
-   error agregado, parseo del formato chileno (CASE-003), la key jamás viaja en errores/logs.
-   9 tests `httptest` con fixtures reales en `testdata/` (cero red en CI). Verificado además
-   end-to-end contra la CMF real (one-off, fuera de CI).
-5. **CI ✓** — GitHub Actions (`.github/workflows/ci.yml`): vet → staticcheck (2026.1, fijado igual
-   que local) → test → build. Primer run verde. Sin secretos ni red real (httptest + fixtures).
+**Fase 0 — Cimientos: CERRADA (DoD completo). Siguiente: Fase 1 — Núcleo.**
+Repo público: `github.com/faborubio/faro` (remote HTTPS). SAD en 1.2.0.
 
-**Los 5 pasos completos → falta el cierre de fase (Definition of Done, 7 pasos, abajo).**
+**Lo que ya existe (no rehacer):**
+- **Fuente v1 = CMF oficial** (ADR-002 enmendado); API key verificada, vive en `.env` (gitignored,
+  ADR-009; plantilla en `.env.example`). mindicador.cl es fallback futuro (Fase 4).
+- **Go 1.26.5** en `~/.local/go` (sin sudo; PATH en `~/.bashrc`). Cero dependencias: puro stdlib.
+- **Dominio** `internal/indicator`: `Snapshot`, `Cadence` (daily/monthly, ADR-011), interfaz
+  `IndicatorSource`.
+- **Postgres dev** en Docker (`./scripts/dev-db.sh`, contenedor `faro-pg`) + migraciones SQL
+  numeradas (`./scripts/migrate.sh`, idempotente). 4 tablas del SAD §6, catálogo sembrado.
+- **Adapter `internal/source/cmf`**: 1 llamada/indicador, backoff en 5xx, fallas parciales
+  entregan lo obtenido + error agregado, parseo chileno estricto (CASE-003: `"12.34"` falla, no
+  corrompe). 10 tests `httptest` con fixtures reales (`testdata/`); la key nunca viaja en errores.
+- **CI verde**: vet → staticcheck 2026.1 → test → build (sin red real ni secretos).
+
+**Fase 1 — Núcleo (siguiente), alcance (SAD §13):** scheduler de refresco diario (ticker +
+on-boot) → persistir snapshots (upsert código+fecha) + `sync_runs`; API `GET /api/:code` y
+`/api/:code/history` + cache en memoria; `sqlc`/`pgx` entran aquí (primeras dependencias).
+Pendientes que tocan Fase 1: AUD-001 (verificar cadencia con datos reales), AUD-003 (límite 1 MB
+si hay backfill histórico), CASE-004 (caracterizar hora de publicación CMF antes de fijar el ticker).
 
 ## Comandos (una vez con Go instalado)
 | Acción | Comando |
@@ -67,8 +61,8 @@ Postgres + cache, nunca llama a la fuente en la request — ADR-003) + **dashboa
 `IndicatorSource` aísla la fuente: el dominio no sabe de la CMF (ADR-002). En tests, `httptest`.
 
 ## Roadmap (SAD §13)
-- **Fase 0 — Cimientos:** gates (API key CMF) + Go + scaffold + Postgres + adapter CMF con tests + CI. ← siguiente
-- **Fase 1 — Núcleo:** scheduler de refresco + histórico + `sync_runs` + API (actual + histórico) + cache.
+- **Fase 0 — Cimientos: ✓ CERRADA** — gates + Go + scaffold + Postgres + adapter CMF testeado + CI.
+- **Fase 1 — Núcleo:** scheduler de refresco + histórico + `sync_runs` + API (actual + histórico) + cache. ← siguiente
 - **Fase 2 — Dashboard + deploy:** HTML + Chart.js embebido; Dockerfile; **primer deploy a VibeNest** (URL viva).
 - **Fase 3 — Distribución:** alertas por webhook + widgets embebibles + rate limiting + CORS.
 - **Fase 4 — Robustez (solo con tracción):** mindicador.cl (y/o BCCh) como fallback de la CMF; docs OpenAPI; métricas.

@@ -93,9 +93,17 @@ func TestParseCLNumber(t *testing.T) {
 		{"0,0", 0, false},              // IPC real
 		{"-0,2", -0.2, false},          // IPC negativo (deflación)
 		{"1.234.567,89", 1234567.89, false},
+		{"1234567,89", 1234567.89, false}, // sin puntos de miles también es válido
 		{"", 0, true},
 		{"  ", 0, true},
 		{"abc", 0, true},
+		// Formato internacional (punto decimal): DEBE fallar ruidosamente,
+		// no convertirse en 1234 (CASE-003 — corrupción silenciosa).
+		{"12.34", 0, true},
+		{"1.2345", 0, true},
+		{"40,842.07", 0, true}, // formato en-US completo
+		{"1..5", 0, true},
+		{"1,2,3", 0, true},
 	}
 	for _, tc := range cases {
 		got, err := parseCLNumber(tc.in)
