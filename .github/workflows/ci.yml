@@ -1,7 +1,8 @@
-# CI de Faro (SAD §11): vet → staticcheck → test → build.
+# CI de Faro (SAD §11): vet → staticcheck → test (unitarios + integración
+# contra el servicio Postgres) → build.
 # Regla de oro: los tests jamás tocan la fuente real (httptest + fixtures);
-# no hay secretos aquí. El servicio Postgres se agrega cuando existan tests
-# de integración (Fase 1).
+# no hay secretos aquí. Las credenciales de abajo son del Postgres efímero
+# del job, espejo de scripts/dev-db.sh.
 name: ci
 
 on:
@@ -15,14 +16,33 @@ permissions:
 jobs:
   ci:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: faro
+          POSTGRES_PASSWORD: faro
+          POSTGRES_DB: faro_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U faro -d faro_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Los tests de integración del store la exigen (y borran esa BD).
+      FARO_TEST_DATABASE_URL: postgres://faro:faro@localhost:5432/faro_test?sslmode=disable
+
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          # sin go.sum aún (cero dependencias); reactivar cuando lleguen (pgx/sqlc, Fase 1)
-          cache: false
+          # con go.sum el cache de módulos ya paga
 
       - name: go vet
         run: go vet ./...
