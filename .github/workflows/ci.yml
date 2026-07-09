@@ -1,0 +1,38 @@
+# CI de Faro (SAD §11): vet → staticcheck → test → build.
+# Regla de oro: los tests jamás tocan la fuente real (httptest + fixtures);
+# no hay secretos aquí. El servicio Postgres se agrega cuando existan tests
+# de integración (Fase 1).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@2026.1
+          staticcheck ./...
+
+      - name: go test
+        run: go test ./... -count=1
+
+      - name: go build
+        run: go build ./...
