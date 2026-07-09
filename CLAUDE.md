@@ -22,9 +22,9 @@ Chart.js embebido con `go:embed` · Docker (imagen mínima) · Deploy en VibeNes
 disciplina de fases heredadas de Oteo/FleetPilot.
 
 ## Estado actual
-**Fase 0 — Cimientos: NO INICIADA.** Existen el SAD, este CLAUDE.md y los docs compañeros día-1
-(`docs/AUDIT.md`, `docs/CASES.md`, `docs/TROUBLESHOOTING.md`). **Lo primero — gates antes de código
-(El Método §4):**
+**Fase 0 — Cimientos: EN CURSO.** Repo público en `github.com/faborubio/faro` (remote HTTPS).
+Existen el SAD (1.2.0), este CLAUDE.md y los docs compañeros día-1 (`docs/AUDIT.md`, `docs/CASES.md`,
+`docs/TROUBLESHOOTING.md`). Progreso — gates antes de código (El Método §4):
 0. **Gates.** (a) **Legal ✓:** resuelto — fuente v1 = **CMF oficial** (ToS clara vía API key),
    mindicador.cl como fallback (ADR-002 enmendado). (b) **API key ✓:** obtenida y verificada con
    `scripts/smoke-cmf.sh` (UF/dólar/UTM/IPC responden). Vive en `.env` (gitignored, ADR-009).
