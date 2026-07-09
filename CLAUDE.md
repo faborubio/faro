@@ -45,7 +45,10 @@ Existen el SAD (1.2.0), este CLAUDE.md y los docs compañeros día-1 (`docs/AUDI
    error agregado, parseo del formato chileno (CASE-003), la key jamás viaja en errores/logs.
    9 tests `httptest` con fixtures reales en `testdata/` (cero red en CI). Verificado además
    end-to-end contra la CMF real (one-off, fuera de CI).
-5. CI (`go vet` + staticcheck + `go test`).
+5. **CI ✓** — GitHub Actions (`.github/workflows/ci.yml`): vet → staticcheck (2026.1, fijado igual
+   que local) → test → build. Primer run verde. Sin secretos ni red real (httptest + fixtures).
+
+**Los 5 pasos completos → falta el cierre de fase (Definition of Done, 7 pasos, abajo).**
 
 ## Comandos (una vez con Go instalado)
 | Acción | Comando |

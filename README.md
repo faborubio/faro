@@ -1,5 +1,8 @@
 # 🗼 Faro
 
+[![ci](https://github.com/faborubio/faro/actions/workflows/ci.yml/badge.svg)](https://github.com/faborubio/faro/actions/workflows/ci.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **API pública + dashboard de indicadores económicos de Chile** — dólar, UF, UTM, IPC — con datos
 de la fuente oficial (CMF), histórico, alertas por webhook y widgets embebibles.
 
