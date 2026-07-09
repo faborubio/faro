@@ -44,6 +44,19 @@ on-boot) → persistir snapshots (upsert código+fecha) + `sync_runs`; API `GET 
 Pendientes que tocan Fase 1: AUD-001 (verificar cadencia con datos reales), AUD-003 (límite 1 MB
 si hay backfill histórico), CASE-004 (caracterizar hora de publicación CMF antes de fijar el ticker).
 
+**Arranque sugerido de Fase 1 (orden):**
+1. **Storage** (`internal/store`): decidir sqlc vs `database/sql` mínimo (ADR-004 admite ambos;
+   sqlc es lo declarado para portafolio). Queries: upsert de snapshot, último valor, histórico por
+   rango, abrir/cerrar `sync_run`. Tests de integración contra el Postgres de `dev-db.sh`.
+2. **Scheduler** (`internal/refresh`): on-boot + ticker; usa `IndicatorSource.Fetch`, persiste,
+   cierra `sync_run` (distinguir "sin cambios esperado" vía `cadence` — ADR-011). Primer refresco
+   real y verificación de valores contra el dashboard de la CMF (paga AUD-001).
+3. **API** (`internal/api` + `cmd/faro`): `GET /api/:code`, `GET /api/:code/history?desde=…`,
+   cache en memoria con TTL; jamás llama a la fuente (ADR-003). Tests con `httptest.Server`.
+4. **CI**: agregar servicio Postgres para los tests de integración; reactivar el cache de
+   `setup-go` cuando exista `go.sum`.
+5. **Cierre**: DoD de 7 pasos (como en Fase 0).
+
 ## Comandos (una vez con Go instalado)
 | Acción | Comando |
 |---|---|
