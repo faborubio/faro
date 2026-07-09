@@ -1,14 +1,16 @@
 // Faro — API pública + dashboard de indicadores económicos de Chile.
 // Un solo binario: scheduler de refresco diario + API HTTP + dashboard
-// (SAD §4). Hoy corre el scheduler (Fase 1, paso 2); la API entra en el
-// paso 3. Config por ENV (ADR-009): DATABASE_URL, CMF_API_KEY y opcional
+// (SAD §4). El dashboard entra en la Fase 2. Config por ENV (ADR-009):
+// DATABASE_URL, CMF_API_KEY y opcionales PORT (default 8080) y
 // REFRESH_INTERVAL (default 24h).
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/faborubio/faro/internal/api"
 	"github.com/faborubio/faro/internal/refresh"
 	"github.com/faborubio/faro/internal/source/cmf"
 	"github.com/faborubio/faro/internal/store"
@@ -58,11 +61,39 @@ func run() error {
 		return fmt.Errorf("postgres no responde (¿./scripts/dev-db.sh y ./scripts/migrate.sh?): %w", err)
 	}
 
-	source := cmf.New(apiKey)
-	refresher := refresh.New(source, store.New(pool), interval, slog.Default())
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
 
-	slog.Info("faro arriba", "fuente", source.Name(), "intervalo", interval.String())
-	refresher.Run(ctx) // bloquea hasta SIGINT/SIGTERM
+	st := store.New(pool)
+	source := cmf.New(apiKey)
+	refresher := refresh.New(source, st, interval, slog.Default())
+
+	server := &http.Server{
+		Addr:              ":" + port,
+		Handler:           api.New(st, 0, slog.Default()).Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go refresher.Run(ctx)
+
+	// El server corre hasta la señal; entonces se apaga graceful con un
+	// plazo corto (VibeNest manda SIGTERM antes de matar el contenedor).
+	errCh := make(chan error, 1)
+	go func() { errCh <- server.ListenAndServe() }()
+	slog.Info("faro arriba", "puerto", port, "fuente", source.Name(), "intervalo", interval.String())
+
+	select {
+	case err := <-errCh:
+		return fmt.Errorf("server HTTP: %w", err)
+	case <-ctx.Done():
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("apagando server: %w", err)
+	}
 	slog.Info("faro detenido")
 	return nil
 }
