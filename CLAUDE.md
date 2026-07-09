@@ -35,7 +35,11 @@ Existen el SAD (1.2.0), este CLAUDE.md y los docs compañeros día-1 (`docs/AUDI
 2. **Scaffold ✓** — módulo `github.com/faborubio/faro`; `cmd/faro` (main placeholder) +
    `internal/indicator` (dominio: `Snapshot`, `Cadence` ADR-011, interfaz `IndicatorSource` ADR-002,
    con test). Build/vet/test verdes.
-3. Postgres + migraciones (tablas `indicators`, `indicator_values`, `alerts`, `sync_runs` — §6 del SAD).
+3. **Postgres + migraciones ✓** — dev en Docker (`scripts/dev-db.sh`, contenedor `faro-pg`,
+   postgres:17-alpine, volumen `faro-pgdata`); migraciones SQL numeradas + runner
+   (`scripts/migrate.sh`, registro en `schema_migrations`, 1 transacción por archivo). Las 4 tablas
+   del SAD §6 + catálogo sembrado con `cadence` (ADR-011). Verificado: constraint de cadencia,
+   upsert idempotente.
 4. Adapter `CMF` (impl de `IndicatorSource`, ADR-002; una llamada por indicador, API key vía ENV) con
    tests `httptest` (cero red real).
 5. CI (`go vet` + staticcheck + `go test`).
@@ -48,7 +52,8 @@ Existen el SAD (1.2.0), este CLAUDE.md y los docs compañeros día-1 (`docs/AUDI
 | Lint | `staticcheck ./...` |
 | Correr local | `go run ./cmd/faro` (o el path del main) |
 | Build | `go build -o bin/faro ./cmd/faro` |
-| Migraciones | por definir (golang-migrate o SQL simple) |
+| BD de desarrollo | `./scripts/dev-db.sh` (levanta) / `./scripts/dev-db.sh stop` |
+| Migraciones | `./scripts/migrate.sh` (SQL numerado en `migrations/`, idempotente) |
 
 ## Arquitectura en una línea
 Un solo binario Go: **scheduler** (refresca 1×/día tras adapter → Postgres) + **API** (sirve de
