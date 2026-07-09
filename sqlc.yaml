@@ -1,0 +1,21 @@
+# sqlc (ADR-004): genera código Go type-safe desde SQL. El esquema es el de las
+# migraciones (fuente única); las queries viven junto al paquete que las usa.
+# Regenerar con: sqlc generate
+version: "2"
+sql:
+  - engine: "postgresql"
+    schema: "migrations"
+    queries: "internal/store/queries.sql"
+    gen:
+      go:
+        package: "db"
+        out: "internal/store/db"
+        sql_package: "pgx/v5"
+        emit_pointers_for_null_types: true
+        overrides:
+          # El dominio transporta valores como float64 (ver indicator.Snapshot);
+          # NUMERIC protege la precisión en reposo, float64 basta en tránsito.
+          - db_type: "pg_catalog.numeric"
+            go_type: "float64"
+          - db_type: "date"
+            go_type: "time.Time"
