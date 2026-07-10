@@ -4,7 +4,7 @@
 //	docker exec faro-pg createdb -U faro faro_test   # una vez
 //	FARO_TEST_DATABASE_URL='postgres://faro:faro@localhost:5432/faro_test' go test ./internal/store/
 //
-// Cada test BORRA el esquema y aplica migrations/*.sql desde cero; por eso el
+// Cada test BORRA el esquema y aplica las migraciones embebidas desde cero; por eso el
 // helper exige que el nombre de la BD contenga "test" — nunca la BD de dev.
 // Sin la variable, se saltan (CI aún no tiene servicio Postgres).
 package store_test
@@ -12,10 +12,7 @@ package store_test
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -23,28 +20,18 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/faborubio/faro/internal/indicator"
+	"github.com/faborubio/faro/internal/migrate"
 	"github.com/faborubio/faro/internal/store"
+	"github.com/faborubio/faro/internal/testdb"
+	"github.com/faborubio/faro/migrations"
 )
 
 func testStore(t *testing.T) (*store.Store, *pgxpool.Pool) {
 	t.Helper()
-	dsn := os.Getenv("FARO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("integración: exporta FARO_TEST_DATABASE_URL (una BD que los tests borran, p. ej. postgres://faro:faro@localhost:5432/faro_test)")
-	}
-	ctx := context.Background()
+	dsn := testdb.Acquire(t)
+	resetSchema(t, dsn)
 
-	cfg, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		t.Fatalf("FARO_TEST_DATABASE_URL inválida: %v", err)
-	}
-	if !strings.Contains(cfg.ConnConfig.Database, "test") {
-		t.Fatalf("la BD %q no parece de pruebas (el nombre debe contener \"test\"): los tests borran el esquema", cfg.ConnConfig.Database)
-	}
-
-	resetSchema(t, cfg.ConnConfig.ConnString())
-
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {
 		t.Fatalf("abrir pool: %v", err)
 	}
@@ -53,8 +40,9 @@ func testStore(t *testing.T) (*store.Store, *pgxpool.Pool) {
 }
 
 // resetSchema deja la BD como recién migrada: tira el esquema public y aplica
-// migrations/*.sql en orden. Usa una conexión aparte en protocolo simple,
-// porque los archivos de migración traen varias sentencias por Exec.
+// las migraciones embebidas por el mismo camino que usa cmd/faro al boot
+// (internal/migrate, AUD-002). Conexión aparte en protocolo simple porque el
+// DROP trae dos sentencias por Exec.
 func resetSchema(t *testing.T, dsn string) {
 	t.Helper()
 	ctx := context.Background()
@@ -74,19 +62,8 @@ func resetSchema(t *testing.T, dsn string) {
 		t.Fatalf("resetear esquema: %v", err)
 	}
 
-	files, err := filepath.Glob(filepath.Join("..", "..", "migrations", "*.sql"))
-	if err != nil || len(files) == 0 {
-		t.Fatalf("sin migraciones en ../../migrations (err=%v)", err)
-	}
-	sort.Strings(files)
-	for _, f := range files {
-		sql, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatalf("leer %s: %v", f, err)
-		}
-		if _, err := conn.Exec(ctx, string(sql)); err != nil {
-			t.Fatalf("aplicar %s: %v", filepath.Base(f), err)
-		}
+	if _, err := migrate.Apply(ctx, dsn, migrations.FS, slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("aplicar migraciones embebidas: %v", err)
 	}
 }
 

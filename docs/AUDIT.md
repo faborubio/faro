@@ -31,7 +31,22 @@ pago** (cómo y cuándo se salda).
 ---
 
 ## AUD-002 — Migraciones solo aplicables con script local (psql)
-- **Estado:** abierta (se paga en Fase 2, con el deploy).
+- **Estado:** **pagada** (Fase 2, 2026-07-09). **Cómo:** el candidato natural del plan, tal cual —
+  `//go:embed` de `migrations/*.sql` (paquete `migrations`) + `internal/migrate` que las aplica al
+  boot de `cmd/faro`, con el mismo contrato `schema_migrations` del script (versión = nombre de
+  archivo, cada archivo en una transacción): ambos caminos son intercambiables, verificado
+  arrancando el binario contra la BD dev migrada por el script (0 re-aplicadas). Advisory lock para
+  boots solapados (verificado con doble boot simultáneo sobre BD vacía: una instancia migra, la
+  otra espera y salta). `scripts/migrate.sh` sigue vigente para migrar a mano. Queda para el paso
+  de deploy: documentar el mecanismo en `docs/DEPLOY.md` cuando ese archivo nazca.
+- **Contexto:** las migraciones corren con `scripts/migrate.sh` (bash + psql) contra `DATABASE_URL`.
+  Funciona para desarrollo, pero el deploy en VibeNest (ADR-008) necesita un mecanismo que corra
+  donde no hay psql ni shell garantizados.
+- **Atajo aceptado:** en Fase 0–1 no hay producción, así que el script basta; se pospone la decisión
+  del mecanismo de prod (embeber migraciones en el binario y aplicarlas al boot, o un job de deploy).
+- **Plan de pago:** decidir e implementar en **Fase 2** junto con el Dockerfile, y documentarlo en
+  `docs/DEPLOY.md` (que nace en esa fase). Candidato natural: `//go:embed` de `migrations/` +
+  aplicación al arrancar (idempotente vía `schema_migrations`, mismo contrato del script).
 - **Contexto:** las migraciones corren con `scripts/migrate.sh` (bash + psql) contra `DATABASE_URL`.
   Funciona para desarrollo, pero el deploy en VibeNest (ADR-008) necesita un mecanismo que corra
   donde no hay psql ni shell garantizados.

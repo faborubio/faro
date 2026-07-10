@@ -19,9 +19,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/faborubio/faro/internal/api"
+	"github.com/faborubio/faro/internal/migrate"
 	"github.com/faborubio/faro/internal/refresh"
 	"github.com/faborubio/faro/internal/source/cmf"
 	"github.com/faborubio/faro/internal/store"
+	"github.com/faborubio/faro/migrations"
 )
 
 func main() {
@@ -58,8 +60,16 @@ func run() error {
 	}
 	defer pool.Close()
 	if err := pool.Ping(ctx); err != nil {
-		return fmt.Errorf("postgres no responde (¿./scripts/dev-db.sh y ./scripts/migrate.sh?): %w", err)
+		return fmt.Errorf("postgres no responde (¿./scripts/dev-db.sh?): %w", err)
 	}
+
+	// Migraciones embebidas al boot (AUD-002): en VibeNest no hay psql ni
+	// shell; el binario deja el esquema al día antes de tocar la base.
+	applied, err := migrate.Apply(ctx, dbURL, migrations.FS, slog.Default())
+	if err != nil {
+		return fmt.Errorf("aplicando migraciones: %w", err)
+	}
+	slog.Info("migraciones al día", "aplicadas_ahora", applied)
 
 	port := os.Getenv("PORT")
 	if port == "" {
