@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -36,14 +37,28 @@ type Client struct {
 	Backoff    time.Duration // base del backoff exponencial; default 500 ms
 }
 
-// New crea un cliente con defaults de producción.
+// New crea un cliente con defaults de producción. Los timeouts van POR FASE
+// además del global: con un solo Client.Timeout, Go reporta cualquier cuelgue
+// como "Client.Timeout exceeded while awaiting headers" sin decir si murió el
+// DNS, el connect, el TLS o la espera de respuesta — en producción esa
+// ambigüedad costó un diagnóstico entero (T-004). Con fases, el error nombra
+// la fase: "dial tcp …: i/o timeout", "TLS handshake timeout", "timeout
+// awaiting response headers".
 func New(apiKey string) *Client {
 	return &Client{
-		BaseURL:    DefaultBaseURL,
-		APIKey:     apiKey,
-		Codes:      defaultCodes,
-		HTTPClient: &http.Client{Timeout: 20 * time.Second},
-		Backoff:    500 * time.Millisecond,
+		BaseURL: DefaultBaseURL,
+		APIKey:  apiKey,
+		Codes:   defaultCodes,
+		HTTPClient: &http.Client{
+			Timeout: 30 * time.Second, // techo global (cuerpo incluido)
+			Transport: &http.Transport{
+				Proxy:                 http.ProxyFromEnvironment,
+				DialContext:           (&net.Dialer{Timeout: 6 * time.Second}).DialContext,
+				TLSHandshakeTimeout:   6 * time.Second,
+				ResponseHeaderTimeout: 10 * time.Second,
+			},
+		},
+		Backoff: 500 * time.Millisecond,
 	}
 }
 
