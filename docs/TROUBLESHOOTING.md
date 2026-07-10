@@ -53,7 +53,9 @@ Formato de cada entrada: **síntoma**, **causa raíz**, **fix**, y para los grav
      firewall del host.
 - **Fix:** del lado de la plataforma (ticket a soporte de VibeNest con la evidencia). Faro degrada
   como fue diseñado: API y dashboard siguen sirviendo y cada fallo queda auditado en `sync_runs`
-  (ADR-003, SAD §8).
+  (ADR-003, SAD §8). **Workaround (2026-07-10):** BD sembrada por la consola SQL del panel con un
+  dump idempotente local (detalle en `docs/DEPLOY.md`) — la URL quedó viva con datos reales sin
+  exponer puertos; el dato envejece hasta que el egress funcione y el scheduler retome.
 - **Lo que el incidente mejoró del código:** (a) el error de red ahora propaga su causa interna
   sin exponer jamás la key (`278f541`); (b) timeouts por fase en el transport — dial/TLS/headers —
   porque el "Client.Timeout exceeded while awaiting headers" de Go no distingue la fase del cuelgue

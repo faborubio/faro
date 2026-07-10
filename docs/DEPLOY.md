@@ -40,14 +40,26 @@ el backfill termina.
 | `PORT` | no | `8080` | puerto del server HTTP |
 | `REFRESH_INTERVAL` | no | `24h` | intervalo del scheduler (formato Go) |
 
-## VibeNest (Fase 2, paso 4)
+## VibeNest (Fase 2, paso 4 — deployado 2026-07-10)
 
-1. Crear el servicio desde el repo de GitHub — VibeNest detecta el `Dockerfile` y lo usa
-   (sin Nixpacks).
-2. Agregar la BD Postgres gestionada → `DATABASE_URL` queda inyectada.
-3. Setear `CMF_API_KEY` en las ENV del panel (nunca en el repo).
-4. Deploy → verificar: logs con `migraciones al día` + `backfill ok`, la URL pública sirve
-   el dashboard y `/api/uf`, y `sync_runs` empieza a acumular evidencia (CASE-002, CASE-004,
-   AUD-004).
+**URL viva: `https://faro.vibenest.net/`.** Lo aprendido del primer deploy real:
 
-*(Los detalles reales del panel se completan con el primer deploy.)*
+1. Servicio desde el repo de GitHub — VibeNest detecta el `Dockerfile` (Build Pack: Dockerfile).
+2. BD Postgres gestionada → `DATABASE_URL` inyectada sola (más las `POSTGRES_*` de Coolify,
+   que Faro ignora).
+3. `CMF_API_KEY` en Project Settings → Environment (nombre exacto; el valor jamás en el repo).
+   Sin ella el binario sale de inmediato con el mensaje que la nombra — el crash loop inicial
+   fue exactamente eso.
+4. **Puertos:** el "Internal Port" del panel (default 3000) debe coincidir con el puerto real
+   de la app. Alineado en 8080 (= `PORT`); desalineado da bad gateway intermitente.
+5. Verificación: logs con `migraciones al día` + `backfill ok`, la URL sirviendo dashboard y
+   `/api/{code}`, y `sync_runs` acumulando evidencia (CASE-002, CASE-004, AUD-004).
+
+**Incidente abierto (T-004):** el egress TCP de la red de contenedores del servidor
+(Hetzner-1-16Gb) está roto — la app no alcanza a la CMF (`dial tcp …:443: i/o timeout`) y el
+refresco diario falla; ticket enviado a VibeNest con la evidencia. **Workaround aplicado
+mientras tanto:** sembrar la BD por la consola SQL del panel (Storage → Open DB console) con
+un dump idempotente generado localmente (`pg_dump --data-only --rows-per-insert=250
+--on-conflict-do-nothing` sobre una BD local recién backfilleada). Sin exponer puertos ni
+mover secretos. Cuando VibeNest arregle el egress, el scheduler interno retoma solo: no hay
+nada que revertir.
