@@ -1,0 +1,9 @@
+# El contexto de build lleva solo lo que el binario necesita.
+# .env JAMÁS entra a una imagen (ADR-009: la key vive en el entorno).
+.env
+.git
+.github
+bin/
+docs/
+scripts/
+*.md

@@ -37,8 +37,8 @@ pago** (cómo y cuándo se salda).
   archivo, cada archivo en una transacción): ambos caminos son intercambiables, verificado
   arrancando el binario contra la BD dev migrada por el script (0 re-aplicadas). Advisory lock para
   boots solapados (verificado con doble boot simultáneo sobre BD vacía: una instancia migra, la
-  otra espera y salta). `scripts/migrate.sh` sigue vigente para migrar a mano. Queda para el paso
-  de deploy: documentar el mecanismo en `docs/DEPLOY.md` cuando ese archivo nazca.
+  otra espera y salta). `scripts/migrate.sh` sigue vigente para migrar a mano. Mecanismo
+  documentado en `docs/DEPLOY.md` (nació con el Dockerfile, Fase 2 paso 3).
 - **Contexto:** las migraciones corren con `scripts/migrate.sh` (bash + psql) contra `DATABASE_URL`.
   Funciona para desarrollo, pero el deploy en VibeNest (ADR-008) necesita un mecanismo que corra
   donde no hay psql ni shell garantizados.
