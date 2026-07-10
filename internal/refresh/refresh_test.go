@@ -86,6 +86,10 @@ func (f *fakeStore) ListIndicators(ctx context.Context) ([]store.Indicator, erro
 	return f.catalog, nil
 }
 
+func (f *fakeStore) SweepOrphanSyncRuns(ctx context.Context) (int, error) {
+	return 0, nil
+}
+
 func (f *fakeStore) Latest(ctx context.Context, code string) (indicator.Snapshot, error) {
 	if s, ok := f.latest[code]; ok {
 		return s, nil

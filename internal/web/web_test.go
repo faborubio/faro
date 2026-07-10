@@ -73,6 +73,10 @@ func TestIndexRindeTarjetas(t *testing.T) {
 	if !strings.Contains(body, `id="conv"`) || !strings.Contains(body, `value="40844.79"`) {
 		t.Error("falta el convertidor o sus valores crudos")
 	}
+	// Cache-busting: los <script> llevan ?v=<hash de los assets embebidos>.
+	if !strings.Contains(body, "/static/app.js?v=") {
+		t.Error("los assets no llevan versión ?v= (cache-busting)")
+	}
 }
 
 func TestConverterExcluyeElIPCYDesapareceSinValores(t *testing.T) {

@@ -73,7 +73,12 @@ pago** (cómo y cuándo se salda).
   series anuales y subir el límite o paginar por año según evidencia (CASES primero).
 
 ## AUD-004 — sync_runs huérfanos en 'running' ante un crash duro
-- **Estado:** abierta (revisar en Fase 2, con el deploy).
+- **Estado:** **pagada** (Fase 2, 2026-07-10, cierre). **Decisión:** barrido on-boot con umbral —
+  `SweepOrphanSyncRuns` cierra como 'error' los runs en 'running' con más de **1 hora** (query
+  sqlc + llamada al inicio de `Run`). El umbral protege a una instancia vieja legítimamente a
+  mitad de ciclo durante un rolling update; la evidencia real que lo calibró: el ciclo más largo
+  observado fue ~8 min (backfill con egress roto, T-004) — 1 h da margen de 7×. Con test de
+  integración (huérfano viejo barrido; run reciente intacto).
 - **Contexto:** un `sync_run` se abre en `'running'` y se cierra al final del ciclo. El apagado
   ordenado está cubierto (SIGTERM en pleno refresco cierra el run igual, vía
   `context.WithoutCancel` — con test). Pero un **crash duro** (OOM del free tier, kill -9, caída
@@ -84,6 +89,19 @@ pago** (cómo y cuándo se salda).
 - **Plan de pago:** en Fase 2 (primer deploy real, donde el OOM es plausible), decidir: barrido
   on-boot (`UPDATE sync_runs SET status='error', error='huérfano' WHERE status='running'`) o
   umbral de frescura en el tablero. Calibrar con evidencia de `sync_runs` reales.
+
+## AUD-005 — El refresco automático en producción depende del fix de egress de VibeNest (T-004)
+- **Estado:** abierta (bloqueada por plataforma; ticket enviado 2026-07-10).
+- **Contexto:** el egress TCP de la red de contenedores de VibeNest está roto (T-004): el
+  scheduler no alcanza a la CMF y cada run diario queda en 'error'. La URL pública vive con
+  datos sembrados por la consola SQL del panel (workaround en `docs/DEPLOY.md`).
+- **Atajo aceptado:** los datos envejecen 1 día por día; el seed manual (abrir consola → pegar
+  dump idempotente) los refresca cuando haga falta. Aceptable para una pieza de portafolio
+  mientras el ticket avanza; inaceptable como estado final.
+- **Plan de pago:** cuando VibeNest arregle el egress, verificar en logs el primer `refresco ok`
+  automático y en `sync_runs` la vuelta a la normalidad; cerrar esta entrada con esa evidencia.
+  Si el ticket muere sin fix: evaluar mover el refresco fuera del contenedor (GitHub Actions
+  cron contra la BD, aceptando exponer el Postgres con TLS) o cambiar de plataforma.
 
 ---
 

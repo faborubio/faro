@@ -9,9 +9,9 @@ de la fuente oficial (CMF), histórico, alertas por webhook y widgets embebibles
 > Un faro guía por su luz: valores de referencia que en Chile se consultan a diario, servidos
 > rápido, con histórico y desde la fuente autoritativa.
 
-**Estado: 🚧 Fase 2 — Dashboard + deploy (siguiente).** Núcleo cerrado: scheduler de refresco
-diario, histórico en Postgres y API JSON con cache, todo verificado con datos reales de la CMF.
-Falta la URL pública (Fase 2). Ver [roadmap](#roadmap).
+**Estado: 🟢 en producción — [faro.vibenest.net](https://faro.vibenest.net/).** Dashboard con
+tendencias y convertidor a pesos, API JSON con histórico desde 2025, imagen Docker de 19 MB.
+Siguiente: Fase 3 — alertas por webhook y widgets. Ver [roadmap](#roadmap).
 
 ---
 
@@ -24,9 +24,10 @@ términos claros) y **autoridad** (fuentes oficiales, incómodas de consumir). F
 
 - ⚡ **API JSON rápida** — valor actual + histórico, p95 < 100 ms (el dato se refresca 1×/día
   desde la fuente; ninguna request espera por ella).
-- 📊 **Dashboard con tendencias** — Chart.js, server-rendered, todo embebido en el binario.
-- 🔔 **Alertas por webhook** — *"avísame si el dólar cruza $1.000"* → POST a Slack/Discord/n8n.
-- 🧩 **Widgets embebibles** — el valor del día en cualquier web con un `<iframe>`/snippet.
+- 📊 **Dashboard con tendencias** — Chart.js, server-rendered, todo embebido en el binario, y un
+  **convertidor** UF/dólar/UTM ↔ pesos con los valores del día.
+- 🔔 **Alertas por webhook** *(Fase 3)* — *"avísame si el dólar cruza $1.000"* → POST a Slack/Discord/n8n.
+- 🧩 **Widgets embebibles** *(Fase 3)* — el valor del día en cualquier web con un `<iframe>`/snippet.
 - 🏛️ **Fuente oficial** — API de la **CMF** (Comisión para el Mercado Financiero), con API key.
 
 ## Arquitectura en una línea
@@ -50,12 +51,12 @@ Dos endpoints públicos de solo lectura (JSON, fechas `YYYY-MM-DD`):
 
 ```bash
 # Valor vigente
-$ curl /api/dolar
-{"code":"dolar","name":"Dólar observado","unit":"CLP","value":935.71,"date":"2026-07-09"}
+$ curl https://faro.vibenest.net/api/dolar
+{"code":"dolar","name":"Dólar observado","unit":"CLP","value":928.99,"date":"2026-07-10"}
 
 # Histórico por rango (sin ?desde= son los últimos 30 días; ?hasta= por defecto es hoy)
-$ curl "/api/uf/history?desde=2026-07-01"
-{"code":"uf","unit":"CLP","desde":"2026-07-01","hasta":"2026-07-09","values":[{"date":"2026-07-09","value":40844.79}]}
+$ curl "https://faro.vibenest.net/api/uf/history?desde=2026-07-01"
+{"code":"uf","unit":"CLP","desde":"2026-07-01","hasta":"2026-07-10","values":[{"date":"2026-07-01","value":40823.03},…]}
 ```
 
 Códigos v1: `uf` · `dolar` · `utm` · `ipc`. Un código desconocido responde `404 {"error":…}`;
@@ -78,8 +79,8 @@ observable en el header `X-Cache`) — ninguna request espera por la CMF.
 |---|---|---|
 | **0 — Cimientos** | gates (legal · API key · viabilidad) · scaffold · Postgres · adapter CMF testeado · CI | ✅ |
 | **1 — Núcleo** | scheduler + histórico + API (actual e histórico) + cache | ✅ |
-| **2 — Dashboard + deploy** | Chart.js embebido · Dockerfile · **URL pública viva** | 🚧 siguiente |
-| **3 — Distribución** | alertas webhook · widgets embebibles · rate limiting · CORS | ⏳ |
+| **2 — Dashboard + deploy** | Chart.js embebido · convertidor · Dockerfile 19 MB · **[URL pública viva](https://faro.vibenest.net/)** | ✅ |
+| **3 — Distribución** | alertas webhook · widgets embebibles · rate limiting · CORS | 🚧 siguiente |
 | **4 — Robustez** *(solo con tracción)* | fallback mindicador.cl/BCCh · OpenAPI · métricas | ⏳ |
 
 ## Desarrollo
@@ -111,6 +112,7 @@ visible y cada fase cierra con una *Definition of Done*.
 |---|---|
 | [SAD-Faro.md](SAD-Faro.md) | ¿Cómo está diseñado y por qué? — la fuente de verdad (ADRs, trade-offs) |
 | [CLAUDE.md](CLAUDE.md) | ¿Cómo retomo el proyecto en 5 minutos? |
+| [docs/DEPLOY.md](docs/DEPLOY.md) | ¿Cómo se construye y despliega? (imagen, ENV, VibeNest) |
 | [docs/AUDIT.md](docs/AUDIT.md) | ¿Qué deuda técnica acepté y cómo se paga? |
 | [docs/CASES.md](docs/CASES.md) | ¿Qué casos raros del dominio encontré? (con datos reales) |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | ¿Qué falló y cómo se arregló? |

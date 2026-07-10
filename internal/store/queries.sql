@@ -50,3 +50,15 @@ SET finished_at        = now(),
     indicators_updated = @indicators_updated,
     error              = @error
 WHERE id = @id;
+
+-- name: SweepOrphanSyncRuns :execrows
+-- Barrido de huérfanos (AUD-004): un crash duro (OOM, kill -9) deja runs en
+-- 'running' para siempre. El umbral de 1 hora protege a una instancia vieja
+-- legítimamente a mitad de ciclo durante un rolling update (el ciclo más
+-- largo observado son ~8 min con egress roto, T-004).
+UPDATE sync_runs
+SET finished_at = now(),
+    status      = 'error',
+    error       = 'huérfano: la instancia murió sin cerrar el run (barrido al boot, AUD-004)'
+WHERE status = 'running'
+  AND started_at < now() - interval '1 hour';

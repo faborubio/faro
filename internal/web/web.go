@@ -9,6 +9,7 @@ import (
 	"context"
 	"embed"
 	"errors"
+	"hash/fnv"
 	"html/template"
 	"io/fs"
 	"log/slog"
@@ -23,6 +24,30 @@ import (
 
 //go:embed templates static
 var assets embed.FS
+
+// assetVersion es un hash de los assets embebidos: viaja como ?v= en los
+// <script>, así el cache del navegador (Cache-Control 1 h) se rompe exacto
+// cuando un redeploy trae assets nuevos — sin él, un app.js viejo puede
+// correr contra HTML nuevo hasta 1 h. Se calcula del contenido (no del
+// commit) porque el build en Docker no lleva .git.
+var assetVersion = func() string {
+	h := fnv.New64a()
+	err := fs.WalkDir(assets, "static", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := fs.ReadFile(assets, path)
+		if err != nil {
+			return err
+		}
+		_, _ = h.Write(b)
+		return nil
+	})
+	if err != nil {
+		panic(err) // imposible: el árbol embebido es de solo lectura
+	}
+	return strconv.FormatUint(h.Sum64(), 36)
+}()
 
 // displayRank fija el orden de las tarjetas (los más consultados primero);
 // códigos fuera de la lista van al final, alfabéticos.
@@ -144,7 +169,11 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	err = s.tmpl.Execute(w, map[string]any{"Cards": cards, "HasConverter": hasConverter})
+	err = s.tmpl.Execute(w, map[string]any{
+		"Cards":        cards,
+		"HasConverter": hasConverter,
+		"AssetV":       assetVersion,
+	})
 	if err != nil {
 		s.log.Error("dashboard: render", "error", err)
 	}

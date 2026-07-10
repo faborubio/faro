@@ -282,3 +282,50 @@ func TestSyncRunLifecycle(t *testing.T) {
 		t.Errorf("run fallido = (%s, %v), quiero (error, mensaje)", status, errText)
 	}
 }
+
+func TestSweepOrphanSyncRuns(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+
+	// Un huérfano viejo (2 h), un run vivo reciente y uno ya cerrado.
+	var oldID, freshID int64
+	if err := pool.QueryRow(ctx,
+		"INSERT INTO sync_runs (source, status, started_at) VALUES ('cmf', 'running', now() - interval '2 hours') RETURNING id",
+	).Scan(&oldID); err != nil {
+		t.Fatalf("sembrar huérfano: %v", err)
+	}
+	var err error
+	if freshID, err = s.StartSyncRun(ctx, "cmf"); err != nil {
+		t.Fatalf("StartSyncRun: %v", err)
+	}
+	doneID, err := s.StartSyncRun(ctx, "cmf")
+	if err != nil {
+		t.Fatalf("StartSyncRun: %v", err)
+	}
+	if err := s.FinishSyncRun(ctx, doneID, store.SyncOK, 0, ""); err != nil {
+		t.Fatalf("FinishSyncRun: %v", err)
+	}
+
+	n, err := s.SweepOrphanSyncRuns(ctx)
+	if err != nil {
+		t.Fatalf("SweepOrphanSyncRuns: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("barridos = %d, quiero 1 (solo el viejo)", n)
+	}
+
+	var status string
+	var finished *time.Time
+	if err := pool.QueryRow(ctx, "SELECT status, finished_at FROM sync_runs WHERE id = $1", oldID).Scan(&status, &finished); err != nil {
+		t.Fatalf("leer huérfano: %v", err)
+	}
+	if status != "error" || finished == nil {
+		t.Errorf("huérfano = (%s, %v), quiero (error, finished_at asignado)", status, finished)
+	}
+	if err := pool.QueryRow(ctx, "SELECT status FROM sync_runs WHERE id = $1", freshID).Scan(&status); err != nil {
+		t.Fatalf("leer run vivo: %v", err)
+	}
+	if status != "running" {
+		t.Errorf("el run vivo reciente quedó %q: el umbral de 1 h no lo protegió", status)
+	}
+}

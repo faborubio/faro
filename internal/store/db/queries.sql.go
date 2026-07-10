@@ -163,6 +163,27 @@ func (q *Queries) StartSyncRun(ctx context.Context, source string) (int64, error
 	return id, err
 }
 
+const sweepOrphanSyncRuns = `-- name: SweepOrphanSyncRuns :execrows
+UPDATE sync_runs
+SET finished_at = now(),
+    status      = 'error',
+    error       = 'huérfano: la instancia murió sin cerrar el run (barrido al boot, AUD-004)'
+WHERE status = 'running'
+  AND started_at < now() - interval '1 hour'
+`
+
+// Barrido de huérfanos (AUD-004): un crash duro (OOM, kill -9) deja runs en
+// 'running' para siempre. El umbral de 1 hora protege a una instancia vieja
+// legítimamente a mitad de ciclo durante un rolling update (el ciclo más
+// largo observado son ~8 min con egress roto, T-004).
+func (q *Queries) SweepOrphanSyncRuns(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, sweepOrphanSyncRuns)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const upsertValue = `-- name: UpsertValue :execrows
 
 INSERT INTO indicator_values (indicator_code, date, value)

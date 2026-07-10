@@ -138,6 +138,17 @@ func indicatorFromRow(code, name, unit, description, cadence string) Indicator {
 	}
 }
 
+// SweepOrphanSyncRuns cierra como 'error' los sync_runs que quedaron en
+// 'running' hace más de una hora: la instancia que los abrió murió sin
+// cerrarlos (crash duro — AUD-004). Devuelve cuántos barrió.
+func (s *Store) SweepOrphanSyncRuns(ctx context.Context) (int, error) {
+	n, err := s.q.SweepOrphanSyncRuns(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("store: barrer sync_runs huérfanos: %w", err)
+	}
+	return int(n), nil
+}
+
 // StartSyncRun abre un sync_run en estado 'running' y devuelve su id.
 func (s *Store) StartSyncRun(ctx context.Context, source string) (int64, error) {
 	id, err := s.q.StartSyncRun(ctx, source)

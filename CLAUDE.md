@@ -22,8 +22,16 @@ Chart.js embebido con `go:embed` · Docker (imagen mínima) · Deploy en VibeNes
 disciplina de fases heredadas de Oteo/FleetPilot.
 
 ## Estado actual
-**Fase 1 — Núcleo: CERRADA (DoD completo). Siguiente: Fase 2 — Dashboard + deploy.**
+**Fase 2 — Dashboard + deploy: CERRADA (DoD completo). Siguiente: Fase 3 — Distribución.**
 Repo público: `github.com/faborubio/faro` (remote HTTPS). SAD en 1.2.0.
+**URL pública viva: `https://faro.vibenest.net/`** (VibeNest sobre Coolify, Hetzner).
+
+**⚠️ Lo único cojo: el refresco automático en prod (AUD-005 / T-004).** El egress TCP de la red
+de contenedores de VibeNest está roto → el scheduler no alcanza a la CMF; ticket enviado
+(2026-07-10). Los datos de prod se sembraron por la consola SQL del panel (receta en
+`docs/DEPLOY.md`) y envejecen 1 día/día hasta que VibeNest arregle; cuando lo haga, el
+scheduler retoma solo — verificar el primer `refresco ok` en logs y **cerrar AUD-005**.
+Localmente todo funciona contra la CMF real.
 
 **Lo que ya existe (no rehacer):**
 - **Fuente v1 = CMF oficial** (ADR-002 enmendado); API key verificada, vive en `.env` (gitignored,
@@ -45,32 +53,41 @@ Repo público: `github.com/faborubio/faro` (remote HTTPS). SAD en 1.2.0.
 - **Scheduler `internal/refresh`**: on-boot + ticker (`REFRESH_INTERVAL`, default 24h). Persiste
   lo parcial ante falla de fuente y cierra el `sync_run` siempre — incluso con SIGTERM a mitad de
   ciclo (`context.WithoutCancel`, con test). 0 cambios con fuente sana = run 'ok' (ADR-011,
-  verificado con datos reales). Sin BD no llama a la fuente.
+  verificado con datos reales). Sin BD no llama a la fuente. **Backfill on-boot** (CASE-006):
+  indicadores sin valores traen año actual + anterior vía `FetchYear` (capacidad opcional
+  `indicator.HistoricalSource`), descartando fechas futuras — la UF llega publicada ~1 mes
+  adelante. **Barrido de huérfanos** al boot: runs 'running' > 1 h se cierran 'error' (AUD-004).
 - **API `internal/api`**: `GET /api/{code}` y `GET /api/{code}/history?desde=…&hasta=…` (default
   últimos 30 días), ServeMux stdlib (sin chi), cache en memoria TTL 60 s con header `X-Cache`,
   errores 404/400 en JSON, jamás llama a la fuente (ADR-003). `cmd/faro` corre scheduler + server
   HTTP en el mismo binario con apagado graceful.
+- **Migraciones embebidas** (`internal/migrate`, AUD-002): `cmd/faro` aplica `migrations/*.sql`
+  al boot — mismo contrato `schema_migrations` que `scripts/migrate.sh` (intercambiables), cada
+  archivo en una transacción, advisory lock para boots solapados.
+- **Dashboard `internal/web`** (ADR-005): HTML server-rendered + Chart.js 4.5.1 vendoreado
+  (`go:embed`, sin CDN), un gráfico por indicador contra la propia API (líneas 90 días; barras
+  13 meses para IPC), **convertidor** UF/dólar/UTM ↔ CLP (UI pura, valores del día), paleta
+  validada (skill dataviz) claro/oscuro, tabla accesible, atribución CMF (gate legal). Assets
+  con `?v=<hash>` (cache-busting) y `Cache-Control` 1 h.
+- **Docker** (ADR-008): multi-stage → scratch, **19 MB** (binario estático + certs CA). `.env`
+  excluido del contexto; usuario no-root. Verificado en contenedor real (migró + backfill por
+  HTTPS + SIGTERM graceful).
+- **Deploy VibeNest**: receta completa y aprendizajes reales en `docs/DEPLOY.md` (Internal Port
+  = `PORT`, `CMF_API_KEY` exacta en Environment, seed por consola SQL como contingencia).
 - **CI verde**: vet → staticcheck 2026.1 → test (unitarios + integración contra servicio
   Postgres 17 del job, BD `faro_test`) → build. Sin red real ni secretos.
 - **Datos reales verificados** (2026-07-09): cadencias confirmadas (AUD-001 pagada), IPC 0,0%
-  es valor legítimo (CASE-005), valores del día ya publicados a las 16:08 de Chile (CASE-004).
+  es valor legítimo (CASE-005), series anuales ≤ 25 KB y UF publicada a futuro (CASE-006).
+- **Tests de integración**: todo paquete nuevo que toque la BD obtiene el DSN vía
+  `internal/testdb.Acquire(t)` — jamás leyendo `FARO_TEST_DATABASE_URL` directo (`go test ./...`
+  corre paquetes en paralelo y se pisan la BD compartida — T-003).
 
-**Fase 2 — Dashboard + deploy (siguiente), alcance (SAD §13):** HTML server-rendered + Chart.js
-embebido con `go:embed` (ADR-005); Dockerfile multi-stage mínimo; **primer deploy a VibeNest →
-URL pública viva** (ADR-008). Pendientes que tocan Fase 2: AUD-002 (migraciones sin psql —
-candidato: embeberlas y aplicarlas al boot), AUD-003 (backfill histórico si los gráficos piden
-series hacia atrás), AUD-004 (sync_runs huérfanos tras crash duro), CASE-002 (observar un fin de
-semana real en `sync_runs`), CASE-004 (hora del ticker, con evidencia).
-
-**Arranque sugerido de Fase 2 (orden):**
-1. **Migraciones embebidas**: `go:embed migrations/` + aplicación idempotente al boot (mismo
-   contrato `schema_migrations` del script) — paga AUD-002 y desbloquea el deploy.
-2. **Dashboard**: HTML + Chart.js embebidos, consumiendo la propia API (`/api/:code/history`).
-   Si 30 días de histórico no bastan para los gráficos, decidir el backfill aquí (AUD-003).
-3. **Dockerfile** multi-stage (imagen mínima, ADR-008) + prueba local del contenedor.
-4. **Deploy a VibeNest**: `DATABASE_URL` y `CMF_API_KEY` por ENV del panel; URL viva y
-   `sync_runs` acumulando evidencia (CASE-002, CASE-004, AUD-004).
-5. **Cierre**: DoD de 7 pasos + sesión nueva.
+**Fase 3 — Distribución (siguiente), alcance (SAD §13):** alertas por webhook (ADR-006, tabla
+`alerts` ya migrada, validación anti-SSRF de `webhook_url` — SAD §8), widgets embebibles
+(ADR-007), rate limiting + CORS (ADR-010). Pendientes que la tocan: **AUD-005** (refresco en
+prod bloqueado por T-004 — verificar y cerrar apenas VibeNest arregle), CASE-002 (observar un
+fin de semana real en `sync_runs`), CASE-004 (hora del ticker con evidencia — bloqueada por
+AUD-005).
 
 ## Comandos (una vez con Go instalado)
 | Acción | Comando |
@@ -83,8 +100,10 @@ semana real en `sync_runs`), CASE-004 (hora del ticker, con evidencia).
 | Correr local | `set -a; . ./.env; set +a; go run ./cmd/faro` (scheduler + API en :8080) |
 | Build | `go build -o bin/faro ./cmd/faro` |
 | BD de desarrollo | `./scripts/dev-db.sh` (levanta) / `./scripts/dev-db.sh stop` |
-| Migraciones | `./scripts/migrate.sh` (SQL numerado en `migrations/`, idempotente) |
+| Migraciones | `./scripts/migrate.sh` (o solas al boot del binario — mismo contrato) |
 | BD de tests (una vez) | `docker exec faro-pg createdb -U faro faro_test` |
+| Imagen Docker | `docker build -t faro .` (scratch, ~19 MB) |
+| Seed de prod (contingencia T-004) | receta en `docs/DEPLOY.md` (dump idempotente → consola SQL del panel) |
 
 ## Arquitectura en una línea
 Un solo binario Go: **scheduler** (refresca 1×/día tras adapter → Postgres) + **API** (sirve de
@@ -93,8 +112,8 @@ Postgres + cache, nunca llama a la fuente en la request — ADR-003) + **dashboa
 
 ## Roadmap (SAD §13)
 - **Fase 0 — Cimientos: ✓ CERRADA** — gates + Go + scaffold + Postgres + adapter CMF testeado + CI.
-- **Fase 1 — Núcleo: ✓ CERRADA** — storage sqlc/pgx + scheduler + `sync_runs` + API (actual + histórico) + cache + CI con Postgres. ← siguiente: Fase 2
-- **Fase 2 — Dashboard + deploy:** HTML + Chart.js embebido; Dockerfile; **primer deploy a VibeNest** (URL viva).
+- **Fase 1 — Núcleo: ✓ CERRADA** — storage sqlc/pgx + scheduler + `sync_runs` + API (actual + histórico) + cache + CI con Postgres.
+- **Fase 2 — Dashboard + deploy: ✓ CERRADA** — migraciones al boot + dashboard con Chart.js + convertidor + backfill + Dockerfile scratch + **URL viva en VibeNest** (refresco en prod pendiente de plataforma, AUD-005). ← siguiente: Fase 3
 - **Fase 3 — Distribución:** alertas por webhook + widgets embebibles + rate limiting + CORS.
 - **Fase 4 — Robustez (solo con tracción):** mindicador.cl (y/o BCCh) como fallback de la CMF; docs OpenAPI; métricas.
 

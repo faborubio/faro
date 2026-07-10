@@ -23,6 +23,7 @@ type Store interface {
 	FinishSyncRun(ctx context.Context, id int64, status store.SyncStatus, updated int, errMsg string) error
 	ListIndicators(ctx context.Context) ([]store.Indicator, error)
 	Latest(ctx context.Context, code string) (indicator.Snapshot, error)
+	SweepOrphanSyncRuns(ctx context.Context) (int, error)
 }
 
 // Refresher orquesta un ciclo fuente → store. Crear con New.
@@ -50,6 +51,14 @@ func New(source indicator.IndicatorSource, st Store, interval time.Duration, log
 // ciclo se loguean y quedan en sync_runs, pero no detienen el scheduler: el
 // próximo tick reintenta.
 func (r *Refresher) Run(ctx context.Context) {
+	// Barrido de huérfanos (AUD-004): runs en 'running' de instancias que
+	// murieron sin cerrar. Solo ruido cosmético en el tablero — si falla, se
+	// sigue igual.
+	if n, err := r.store.SweepOrphanSyncRuns(ctx); err != nil {
+		r.log.Warn("barrido de sync_runs huérfanos falló", "error", err)
+	} else if n > 0 {
+		r.log.Info("sync_runs huérfanos barridos", "cerrados", n)
+	}
 	if err := r.Backfill(ctx); err != nil {
 		r.log.Error("backfill on-boot falló", "error", err)
 	}
