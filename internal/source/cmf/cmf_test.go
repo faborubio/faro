@@ -202,6 +202,26 @@ func TestFetchDoesNotRetryOnRejectedKey(t *testing.T) {
 	}
 }
 
+func TestNetworkErrorCarriesCauseButNeverTheKey(t *testing.T) {
+	// T-004: "error de red" a secas no distingue DNS de timeout de TLS. La
+	// causa interna del *url.Error es diagnóstico seguro; la key (que viaja
+	// en la URL) jamás debe aparecer.
+	c, srv := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	srv.Close() // puerto muerto → error de transporte real (connection refused)
+	c.Codes = []string{"uf"}
+
+	_, err := c.Fetch(context.Background())
+	if err == nil {
+		t.Fatal("quiero error de red")
+	}
+	if !strings.Contains(err.Error(), "error de red contra la CMF:") {
+		t.Errorf("el error no trae la causa de red: %v", err)
+	}
+	if strings.Contains(err.Error(), "test-key") || strings.Contains(err.Error(), srv.URL) {
+		t.Errorf("el error expone la key o la URL: %v", err)
+	}
+}
+
 func TestFetchPartialFailureReturnsWhatItGot(t *testing.T) {
 	fixtures := fixtureHandler(t)
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

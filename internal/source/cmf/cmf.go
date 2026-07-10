@@ -132,8 +132,7 @@ func (c *Client) doOnce(ctx context.Context, code, resource string) (snaps []ind
 	}
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
-		// El error de transporte puede contener la URL (y la key): no se propaga tal cual.
-		return nil, errors.New("error de red contra la CMF"), true
+		return nil, fmt.Errorf("error de red contra la CMF: %w", sanitizeNetErr(err)), true
 	}
 	defer resp.Body.Close()
 
@@ -169,6 +168,19 @@ func (c *Client) doOnce(ctx context.Context, code, resource string) (snaps []ind
 		return nil, errors.New("la CMF no trajo valores para el indicador"), false
 	}
 	return snaps, nil, false
+}
+
+// sanitizeNetErr rescata la causa de un error de transporte SIN la URL (que
+// lleva la key): http.Client envuelve todo en *url.Error, cuyo String imprime
+// la URL completa, pero su causa interna ("dial tcp …: i/o timeout",
+// "lookup …: no such host") es segura y distingue DNS de timeout de TLS —
+// el diagnóstico que un "error de red" a secas esconde (T-004).
+func sanitizeNetErr(err error) error {
+	var uerr *url.Error
+	if errors.As(err, &uerr) && uerr.Err != nil {
+		return uerr.Err
+	}
+	return errors.New("causa no disponible (error con URL embebida)")
 }
 
 func (c *Client) httpClient() *http.Client {
