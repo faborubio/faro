@@ -57,7 +57,11 @@ pago** (cómo y cuándo se salda).
   aplicación al arrancar (idempotente vía `schema_migrations`, mismo contrato del script).
 
 ## AUD-003 — Respuesta de la CMF limitada a 1 MB en el adapter
-- **Estado:** abierta (revisar cuando entre el backfill).
+- **Estado:** **pagada** (Fase 2, 2026-07-09). **Hallazgo:** medidas las series anuales reales
+  (CASE-006): el año más pesado (`uf/2025`, 365 entradas) son 25 KB — 2,5% del límite. El backfill
+  entró (año actual + anterior por indicador vacío, `internal/refresh.Backfill` + `cmf.FetchYear`)
+  **sin tocar el límite ni paginar**: 1 MB da holgura de 40× sobre lo observado. Verificado contra
+  BD vacía real: 973 snapshots en un run `cmf/backfill` cerrado 'ok'.
 - **Contexto:** `doOnce` lee el cuerpo con `io.LimitReader(1<<20)`. Para el valor vigente sobra
   (≈100 bytes), pero el backfill de histórico (`/uf/2025`, series anuales) puede acercarse
   al límite o requerir paginación.

@@ -35,7 +35,8 @@ func fixtureHandler(t *testing.T) http.Handler {
 		if r.URL.Query().Get("formato") != "json" {
 			t.Errorf("formato = %q, quiero json", r.URL.Query().Get("formato"))
 		}
-		code := strings.TrimPrefix(r.URL.Path, "/")
+		// "uf" → testdata/uf.json; "uf/2026" (serie anual) → testdata/uf-2026.json.
+		code := strings.ReplaceAll(strings.TrimPrefix(r.URL.Path, "/"), "/", "-")
 		b, err := os.ReadFile(filepath.Join("testdata", code+".json"))
 		if err != nil {
 			http.NotFound(w, r)
@@ -77,6 +78,33 @@ func TestFetchMapsRealResponses(t *testing.T) {
 		}
 		if got := s.Date.Format("2006-01-02"); got != w.date {
 			t.Errorf("%s: Date = %s, quiero %s", s.Code, got, w.date)
+		}
+	}
+}
+
+func TestFetchYearMapsRealYearSeries(t *testing.T) {
+	c, _ := newTestClient(t, fixtureHandler(t))
+
+	snaps, err := c.FetchYear(context.Background(), "uf", 2026)
+	if err != nil {
+		t.Fatalf("FetchYear: %v", err)
+	}
+	// La captura real del 2026-07-09 trae 221 entradas — incluye ~1 mes de
+	// UF futura (CASE-006): el adapter entrega TODO lo que la fuente publica;
+	// filtrar el futuro es decisión del scheduler, no de la fuente.
+	if len(snaps) != 221 {
+		t.Fatalf("len(snaps) = %d, quiero 221", len(snaps))
+	}
+	first, last := snaps[0], snaps[len(snaps)-1]
+	if first.Value != 39731.79 || first.Date.Format("2006-01-02") != "2026-01-01" {
+		t.Errorf("primera entrada = %v @ %s, quiero 39731.79 @ 2026-01-01", first.Value, first.Date.Format("2006-01-02"))
+	}
+	if last.Value != 40844.79 || last.Date.Format("2006-01-02") != "2026-08-09" {
+		t.Errorf("última entrada = %v @ %s, quiero 40844.79 @ 2026-08-09", last.Value, last.Date.Format("2006-01-02"))
+	}
+	for _, s := range snaps {
+		if s.Code != "uf" {
+			t.Fatalf("snapshot con código %q, quiero uf", s.Code)
 		}
 	}
 }

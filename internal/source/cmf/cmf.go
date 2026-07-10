@@ -50,6 +50,9 @@ func New(apiKey string) *Client {
 // Name identifica la fuente en sync_runs.
 func (c *Client) Name() string { return "cmf" }
 
+// El adapter también sabe traer histórico por año (backfill, CASE-006).
+var _ indicator.HistoricalSource = (*Client)(nil)
+
 // Fetch trae los indicadores configurados, una llamada por código (ADR-002).
 // Ante fallas parciales devuelve los snapshots que sí se obtuvieron junto con
 // el error agregado: el scheduler decide persistir lo parcial y registrar el
@@ -58,7 +61,7 @@ func (c *Client) Fetch(ctx context.Context) ([]indicator.Snapshot, error) {
 	var snaps []indicator.Snapshot
 	var errs []error
 	for _, code := range c.codes() {
-		s, err := c.fetchOne(ctx, code)
+		s, err := c.fetchOne(ctx, code, url.PathEscape(code))
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", code, err))
 			continue
@@ -75,10 +78,19 @@ func (c *Client) codes() []string {
 	return defaultCodes
 }
 
-// fetchOne pide un indicador con hasta 3 intentos y backoff exponencial ante
-// errores transitorios (red, HTTP 5xx) — SAD §8. Los errores definitivos
-// (4xx, parseo) no se reintentan.
-func (c *Client) fetchOne(ctx context.Context, code string) ([]indicator.Snapshot, error) {
+// FetchYear trae la serie completa de un indicador para un año (recurso
+// "{code}/{año}", mismo retry/backoff que Fetch). Las series anuales reales
+// son pequeñas — ≤ 25 KB el año más pesado (CASE-006) — así que el límite de
+// 1 MB del adapter queda como está (AUD-003).
+func (c *Client) FetchYear(ctx context.Context, code string, year int) ([]indicator.Snapshot, error) {
+	return c.fetchOne(ctx, code, url.PathEscape(code)+"/"+strconv.Itoa(year))
+}
+
+// fetchOne pide un recurso de un indicador con hasta 3 intentos y backoff
+// exponencial ante errores transitorios (red, HTTP 5xx) — SAD §8. Los errores
+// definitivos (4xx, parseo) no se reintentan. code etiqueta los snapshots;
+// resource es el path ya escapado bajo la raíz de la API.
+func (c *Client) fetchOne(ctx context.Context, code, resource string) ([]indicator.Snapshot, error) {
 	backoff := c.Backoff
 	if backoff <= 0 {
 		backoff = 500 * time.Millisecond
@@ -92,7 +104,7 @@ func (c *Client) fetchOne(ctx context.Context, code string) ([]indicator.Snapsho
 			case <-time.After(backoff << (attempt - 1)):
 			}
 		}
-		snaps, err, retryable := c.doOnce(ctx, code)
+		snaps, err, retryable := c.doOnce(ctx, code, resource)
 		if err == nil {
 			return snaps, nil
 		}
@@ -111,8 +123,8 @@ type entry struct {
 	Fecha string `json:"Fecha"`
 }
 
-func (c *Client) doOnce(ctx context.Context, code string) (snaps []indicator.Snapshot, err error, retryable bool) {
-	u := strings.TrimRight(c.BaseURL, "/") + "/" + url.PathEscape(code) +
+func (c *Client) doOnce(ctx context.Context, code, resource string) (snaps []indicator.Snapshot, err error, retryable bool) {
+	u := strings.TrimRight(c.BaseURL, "/") + "/" + resource +
 		"?apikey=" + url.QueryEscape(c.APIKey) + "&formato=json"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {

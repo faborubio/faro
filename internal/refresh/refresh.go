@@ -7,6 +7,7 @@ package refresh
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -20,6 +21,8 @@ type Store interface {
 	UpsertSnapshots(ctx context.Context, snaps []indicator.Snapshot) (int, error)
 	StartSyncRun(ctx context.Context, source string) (int64, error)
 	FinishSyncRun(ctx context.Context, id int64, status store.SyncStatus, updated int, errMsg string) error
+	ListIndicators(ctx context.Context) ([]store.Indicator, error)
+	Latest(ctx context.Context, code string) (indicator.Snapshot, error)
 }
 
 // Refresher orquesta un ciclo fuente → store. Crear con New.
@@ -42,10 +45,14 @@ func New(source indicator.IndicatorSource, st Store, interval time.Duration, log
 	return &Refresher{source: source, store: st, interval: interval, log: log}
 }
 
-// Run refresca de inmediato (on-boot) y luego cada intervalo, hasta que el
-// contexto se cancele. Los errores de un ciclo se loguean y quedan en
-// sync_runs, pero no detienen el scheduler: el próximo tick reintenta.
+// Run backfillea los indicadores vacíos, refresca de inmediato (on-boot) y
+// luego cada intervalo, hasta que el contexto se cancele. Los errores de un
+// ciclo se loguean y quedan en sync_runs, pero no detienen el scheduler: el
+// próximo tick reintenta.
 func (r *Refresher) Run(ctx context.Context) {
+	if err := r.Backfill(ctx); err != nil {
+		r.log.Error("backfill on-boot falló", "error", err)
+	}
 	if err := r.RefreshOnce(ctx); err != nil {
 		r.log.Error("refresco on-boot falló", "error", err)
 	}
@@ -61,6 +68,62 @@ func (r *Refresher) Run(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// Backfill puebla el histórico de los indicadores del catálogo que aún no
+// tienen ningún valor — el estado de un deploy recién nacido, donde los
+// gráficos del dashboard estarían vacíos. Trae de la fuente el año actual y
+// el anterior (si la fuente sabe de histórico) y descarta fechas futuras: la
+// UF llega publicada ~1 mes adelante y Latest la reportaría como "vigente"
+// (CASE-006). Con el catálogo ya poblado no llama a la fuente ni abre
+// sync_run: en boots normales es un no-op.
+func (r *Refresher) Backfill(ctx context.Context) error {
+	hist, ok := r.source.(indicator.HistoricalSource)
+	if !ok {
+		return nil
+	}
+	inds, err := r.store.ListIndicators(ctx)
+	if err != nil {
+		return err
+	}
+	var pending []string
+	for _, ind := range inds {
+		_, err := r.store.Latest(ctx, ind.Code)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			pending = append(pending, ind.Code)
+		case err != nil:
+			return err
+		}
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+
+	id, err := r.store.StartSyncRun(ctx, r.source.Name()+"/backfill")
+	if err != nil {
+		return err
+	}
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	var snaps []indicator.Snapshot
+	var errs []error
+	for _, code := range pending {
+		for _, year := range []int{today.Year() - 1, today.Year()} {
+			s, err := hist.FetchYear(ctx, code, year)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s/%d: %w", code, year, err))
+				continue
+			}
+			for _, sn := range s {
+				if sn.Date.After(today) {
+					continue
+				}
+				snaps = append(snaps, sn)
+			}
+		}
+	}
+	changed, upsertErr := r.store.UpsertSnapshots(ctx, snaps)
+	return r.finishRun(ctx, "backfill", id, len(snaps), changed, errors.Join(errors.Join(errs...), upsertErr))
 }
 
 // RefreshOnce ejecuta un ciclo completo: abre sync_run, trae de la fuente,
@@ -79,24 +142,28 @@ func (r *Refresher) RefreshOnce(ctx context.Context) error {
 
 	snaps, fetchErr := r.source.Fetch(ctx)
 	changed, upsertErr := r.store.UpsertSnapshots(ctx, snaps)
+	return r.finishRun(ctx, "refresco", id, len(snaps), changed, errors.Join(fetchErr, upsertErr))
+}
 
+// finishRun cierra un sync_run con el resultado del ciclo (refresco o
+// backfill) y lo loguea. Cierra aunque el contexto muera a mitad del ciclo
+// (SIGTERM en pleno refresco): si no, queda huérfano en 'running' para
+// siempre.
+func (r *Refresher) finishRun(ctx context.Context, what string, id int64, snapCount, changed int, runErr error) error {
 	status := store.SyncOK
-	runErr := errors.Join(fetchErr, upsertErr)
 	msg := ""
 	if runErr != nil {
 		status = store.SyncError
 		msg = runErr.Error()
 	}
-	// Cerrar el run aunque el contexto muera a mitad del ciclo (SIGTERM en
-	// pleno refresco): si no, queda huérfano en 'running' para siempre.
 	if err := r.store.FinishSyncRun(context.WithoutCancel(ctx), id, status, changed, msg); err != nil {
 		return errors.Join(runErr, err)
 	}
 
 	if runErr != nil {
-		r.log.Warn("refresco con errores", "sync_run", id, "snapshots", len(snaps), "actualizados", changed, "error", runErr)
+		r.log.Warn(what+" con errores", "sync_run", id, "snapshots", snapCount, "actualizados", changed, "error", runErr)
 	} else {
-		r.log.Info("refresco ok", "sync_run", id, "snapshots", len(snaps), "actualizados", changed)
+		r.log.Info(what+" ok", "sync_run", id, "snapshots", snapCount, "actualizados", changed)
 	}
 	return runErr
 }

@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Faro — indicadores económicos de Chile</title>
+<meta name="description" content="UF, dólar, UTM e IPC de Chile: valores del día, tendencia y API JSON pública.">
+<style>
+  /* Paleta validada (dataviz): roles, no hex sueltos; el modo oscuro
+     redefine los mismos roles. */
+  :root {
+    --plane: #f9f9f7;
+    --surface: #fcfcfb;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --ring: rgba(11, 11, 11, 0.10);
+    --serie-uf: #2a78d6;
+    --serie-dolar: #1baf7a;
+    --serie-utm: #4a3aa7;
+    --serie-ipc: #008300;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --plane: #0d0d0d;
+      --surface: #1a1a19;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --ring: rgba(255, 255, 255, 0.10);
+      --serie-uf: #3987e5;
+      --serie-dolar: #199e70;
+      --serie-utm: #9085e9;
+      --serie-ipc: #008300;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--plane);
+    color: var(--ink);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header, main, footer { max-width: 1100px; margin: 0 auto; padding: 0 1.25rem; }
+  header { padding-top: 2.5rem; padding-bottom: 1rem; }
+  h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
+  h1 .beam { color: var(--serie-uf); }
+  header p { margin: 0; color: var(--ink-2); }
+  header code {
+    background: var(--surface);
+    border: 1px solid var(--ring);
+    border-radius: 4px;
+    padding: 0 .35em;
+    font-size: .9em;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr));
+    gap: 1.25rem;
+    padding-bottom: 2rem;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--ring);
+    border-radius: 10px;
+    padding: 1.1rem 1.25rem 1rem;
+  }
+  .card h2 { font-size: 1rem; font-weight: 600; margin: 0; }
+  .card .desc { margin: .1rem 0 0; font-size: .82rem; color: var(--muted); }
+  .stat { display: flex; align-items: baseline; gap: .5rem; margin: .7rem 0 .4rem; flex-wrap: wrap; }
+  .stat .value { font-size: 2.1rem; font-weight: 600; line-height: 1.1; }
+  .stat .unit { color: var(--ink-2); font-size: .95rem; }
+  .stat .date { color: var(--muted); font-size: .82rem; margin-left: auto; }
+  .stat .empty { color: var(--muted); font-size: 1rem; }
+  .plot { position: relative; height: 190px; }
+  .plot .nodata {
+    position: absolute; inset: 0;
+    display: none; align-items: center; justify-content: center;
+    color: var(--muted); font-size: .9rem;
+  }
+  details { margin-top: .6rem; font-size: .85rem; }
+  summary { cursor: pointer; color: var(--ink-2); }
+  details table { width: 100%; border-collapse: collapse; margin-top: .5rem; }
+  details th, details td {
+    text-align: right; padding: .25rem .5rem;
+    border-bottom: 1px solid var(--grid);
+    font-variant-numeric: tabular-nums;
+  }
+  details th:first-child, details td:first-child { text-align: left; }
+  details th { color: var(--muted); font-weight: 500; }
+  details .tbody-scroll { max-height: 14rem; overflow-y: auto; }
+  footer {
+    padding: 1rem 1.25rem 2.5rem;
+    color: var(--muted); font-size: .85rem;
+    border-top: 1px solid var(--grid);
+  }
+  footer a { color: var(--ink-2); }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="beam">◗</span> Faro</h1>
+  <p>Indicadores económicos de Chile — valores del día, tendencia y API JSON pública
+     (<code>GET /api/uf</code>, <code>GET /api/uf/history</code>).</p>
+</header>
+
+<main>
+  <div class="grid">
+  {{range .Cards}}
+    <section class="card" data-code="{{.Code}}" data-cadence="{{.Cadence}}" data-unit="{{.Unit}}">
+      <h2>{{.Name}}</h2>
+      <p class="desc">{{.Description}}</p>
+      <div class="stat">
+        {{if .HasValue}}
+          <span class="value">{{.Value}}</span>
+          <span class="unit">{{.Unit}}</span>
+          <span class="date">al {{.Date}}</span>
+        {{else}}
+          <span class="empty">aún sin datos — el primer refresco está en camino</span>
+        {{end}}
+      </div>
+      <div class="plot">
+        <canvas aria-label="Tendencia de {{.Name}}" role="img"></canvas>
+        <div class="nodata">sin histórico para graficar</div>
+      </div>
+      <details>
+        <summary>Ver tabla</summary>
+        <div class="tbody-scroll">
+          <table>
+            <thead><tr><th>Fecha</th><th>Valor ({{.Unit}})</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+  {{end}}
+  </div>
+</main>
+
+<footer>
+  Datos: <a href="https://api.cmfchile.cl/documentacion/index.html">API oficial de la CMF</a>
+  (Comisión para el Mercado Financiero) · refresco diario ·
+  <a href="https://github.com/faborubio/faro">código en GitHub</a>
+</footer>
+
+<script src="/static/chart.umd.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

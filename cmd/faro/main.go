@@ -23,6 +23,7 @@ import (
 	"github.com/faborubio/faro/internal/refresh"
 	"github.com/faborubio/faro/internal/source/cmf"
 	"github.com/faborubio/faro/internal/store"
+	"github.com/faborubio/faro/internal/web"
 	"github.com/faborubio/faro/migrations"
 )
 
@@ -80,9 +81,15 @@ func run() error {
 	source := cmf.New(apiKey)
 	refresher := refresh.New(source, st, interval, slog.Default())
 
+	// API y dashboard comparten binario y puerto: /api/* va a la API JSON,
+	// el resto (portada + assets) al dashboard (ADR-005).
+	mux := http.NewServeMux()
+	mux.Handle("/api/", api.New(st, 0, slog.Default()).Handler())
+	mux.Handle("/", web.New(st, slog.Default()).Handler())
+
 	server := &http.Server{
 		Addr:              ":" + port,
-		Handler:           api.New(st, 0, slog.Default()).Handler(),
+		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

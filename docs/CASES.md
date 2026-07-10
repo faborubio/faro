@@ -73,6 +73,20 @@ Formato de cada caso: **síntoma observado**, **por qué pasa**, **cómo lo trat
   fila, y `store.ErrNotFound`/404 en la API. Las alertas (Fase 3) deben comparar contra umbrales sin
   tratar 0 como caso especial.
 
+## CASE-006 — Las series anuales de la CMF son pequeñas… y la UF llega del futuro
+- **Evidencia (2026-07-09, respuestas reales):** `uf/2025` = 25 196 bytes / 365 entradas (el año
+  completo más pesado); `dolar/2025` = 16 406 B / 248 (solo días hábiles); `utm/2025` y `ipc/2025`
+  ≈ 800 B / 12. Todo ≤ 2,5% del límite de 1 MB del adapter (AUD-003): **no hace falta paginar ni
+  subir el límite** para el backfill por año.
+- **Sorpresa:** `uf/2026` consultado el 2026-07-09 (día 190) trae **221 entradas — hasta el
+  2026-08-09**. La UF se fija por adelantado con el IPC del mes anterior (la serie corre del día 10
+  al 9 del mes siguiente). Además llega **plana** en ese tramo final (40.844,79): consecuencia
+  legítima del IPC 0,0% de junio (CASE-005), no padding de la API.
+- **Cómo lo trata Faro:** el backfill **descarta fechas futuras** (`date > hoy`) antes de persistir.
+  Si no, `Latest` (máxima fecha) reportaría como "vigente" un valor fechado un mes adelante. El
+  valor futuro de la UF es una curiosidad de la fuente, no parte del producto: el histórico de Faro
+  termina hoy.
+
 ---
 
 *Cada caso nuevo del dominio entra aquí **antes** de tocar heurística o configuración.*

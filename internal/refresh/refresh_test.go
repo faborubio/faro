@@ -4,6 +4,7 @@ package refresh
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -35,6 +36,31 @@ func (f *fakeSource) callCount() int {
 	return f.calls
 }
 
+// histSource es un fakeSource que además implementa HistoricalSource.
+type histSource struct {
+	fakeSource
+	byYear    map[int][]indicator.Snapshot // serie a devolver por año (todos los códigos)
+	yearErr   map[int]error
+	mu2       sync.Mutex
+	yearCalls []string // "code/año", en orden
+}
+
+func (h *histSource) FetchYear(ctx context.Context, code string, year int) ([]indicator.Snapshot, error) {
+	h.mu2.Lock()
+	h.yearCalls = append(h.yearCalls, fmt.Sprintf("%s/%d", code, year))
+	h.mu2.Unlock()
+	if err := h.yearErr[year]; err != nil {
+		return nil, err
+	}
+	var out []indicator.Snapshot
+	for _, s := range h.byYear[year] {
+		if s.Code == code {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
 type finishCall struct {
 	id      int64
 	status  store.SyncStatus
@@ -47,11 +73,24 @@ type fakeStore struct {
 	changedPerUpsert int
 	upsertErr        error
 	startErr         error
+	catalog          []store.Indicator             // para ListIndicators (backfill)
+	latest           map[string]indicator.Snapshot // códigos que ya tienen valores
 
 	mu       sync.Mutex
 	upserted [][]indicator.Snapshot
 	started  []string
 	finished []finishCall
+}
+
+func (f *fakeStore) ListIndicators(ctx context.Context) ([]store.Indicator, error) {
+	return f.catalog, nil
+}
+
+func (f *fakeStore) Latest(ctx context.Context, code string) (indicator.Snapshot, error) {
+	if s, ok := f.latest[code]; ok {
+		return s, nil
+	}
+	return indicator.Snapshot{}, store.ErrNotFound
 }
 
 func (f *fakeStore) UpsertSnapshots(ctx context.Context, snaps []indicator.Snapshot) (int, error) {
@@ -215,6 +254,124 @@ func TestRefreshOnceCierraElRunAunqueElContextoMuera(t *testing.T) {
 	}
 	if fin.ctxErr != nil {
 		t.Errorf("FinishSyncRun corrió con contexto muerto (%v): el cierre del run debe sobrevivir al shutdown", fin.ctxErr)
+	}
+}
+
+func catalog(codes ...string) []store.Indicator {
+	out := make([]store.Indicator, len(codes))
+	for i, c := range codes {
+		out[i] = store.Indicator{Code: c}
+	}
+	return out
+}
+
+func TestBackfillSoloIndicadoresVacios(t *testing.T) {
+	// uf ya tiene valores; dolar está vacío → solo dolar se backfillea, con
+	// el año actual y el anterior.
+	year := time.Now().UTC().Year()
+	src := &histSource{byYear: map[int][]indicator.Snapshot{
+		year - 1: {snap("dolar", 900.10)},
+		year:     {snap("dolar", 945.80)},
+	}}
+	st := &fakeStore{
+		changedPerUpsert: 2,
+		catalog:          catalog("uf", "dolar"),
+		latest:           map[string]indicator.Snapshot{"uf": snap("uf", 40842.07)},
+	}
+	r := New(src, st, 0, nil)
+
+	if err := r.Backfill(context.Background()); err != nil {
+		t.Fatalf("Backfill: %v", err)
+	}
+	wantCalls := []string{fmt.Sprintf("dolar/%d", year-1), fmt.Sprintf("dolar/%d", year)}
+	if fmt.Sprint(src.yearCalls) != fmt.Sprint(wantCalls) {
+		t.Errorf("FetchYear llamado con %v, quiero %v", src.yearCalls, wantCalls)
+	}
+	if len(st.started) != 1 || st.started[0] != "fake/backfill" {
+		t.Errorf("sync_runs abiertos = %v, quiero uno de 'fake/backfill'", st.started)
+	}
+	fin := st.lastFinish(t)
+	if fin.status != store.SyncOK || fin.updated != 2 {
+		t.Errorf("cierre = %+v, quiero (ok, 2)", fin)
+	}
+	if len(st.upserted) != 1 || len(st.upserted[0]) != 2 {
+		t.Errorf("upserted = %v, quiero un lote de 2 snapshots", st.upserted)
+	}
+}
+
+func TestBackfillDescartaFechasFuturas(t *testing.T) {
+	// La UF llega publicada ~1 mes adelante (CASE-006): lo futuro no se
+	// persiste, o Latest lo reportaría como "vigente".
+	now := time.Now().UTC()
+	pasado := indicator.Snapshot{Code: "uf", Value: 40000, Date: now.AddDate(0, 0, -10)}
+	futuro := indicator.Snapshot{Code: "uf", Value: 41000, Date: now.AddDate(0, 0, 10)}
+	src := &histSource{byYear: map[int][]indicator.Snapshot{
+		now.Year(): {pasado, futuro},
+	}}
+	st := &fakeStore{changedPerUpsert: 1, catalog: catalog("uf")}
+	r := New(src, st, 0, nil)
+
+	if err := r.Backfill(context.Background()); err != nil {
+		t.Fatalf("Backfill: %v", err)
+	}
+	if len(st.upserted) != 1 || len(st.upserted[0]) != 1 {
+		t.Fatalf("upserted = %v, quiero solo el snapshot pasado", st.upserted)
+	}
+	if got := st.upserted[0][0]; got.Value != pasado.Value {
+		t.Errorf("se persistió %v, quiero el valor pasado %v", got.Value, pasado.Value)
+	}
+}
+
+func TestBackfillSinPendientesEsNoOp(t *testing.T) {
+	src := &histSource{}
+	st := &fakeStore{
+		catalog: catalog("uf"),
+		latest:  map[string]indicator.Snapshot{"uf": snap("uf", 40842.07)},
+	}
+	r := New(src, st, 0, nil)
+
+	if err := r.Backfill(context.Background()); err != nil {
+		t.Fatalf("Backfill: %v", err)
+	}
+	if len(src.yearCalls) != 0 || len(st.started) != 0 || len(st.upserted) != 0 {
+		t.Errorf("no-op esperado: llamadas=%v runs=%v upserts=%v", src.yearCalls, st.started, st.upserted)
+	}
+}
+
+func TestBackfillFuenteSinHistoricoEsNoOp(t *testing.T) {
+	// fakeSource no implementa HistoricalSource: el backfill se salta sin error.
+	src := &fakeSource{}
+	st := &fakeStore{catalog: catalog("uf")}
+	r := New(src, st, 0, nil)
+
+	if err := r.Backfill(context.Background()); err != nil {
+		t.Fatalf("Backfill: %v", err)
+	}
+	if len(st.started) != 0 {
+		t.Errorf("sync_runs abiertos = %v, quiero ninguno", st.started)
+	}
+}
+
+func TestBackfillFallaParcial(t *testing.T) {
+	// Un año falla, el otro no: se persiste lo obtenido y el run cierra
+	// 'error' con el detalle (mismo contrato que RefreshOnce).
+	year := time.Now().UTC().Year()
+	src := &histSource{
+		byYear:  map[int][]indicator.Snapshot{year: {snap("uf", 40842.07)}},
+		yearErr: map[int]error{year - 1: errors.New("la CMF respondió HTTP 500")},
+	}
+	st := &fakeStore{changedPerUpsert: 1, catalog: catalog("uf")}
+	r := New(src, st, 0, nil)
+
+	if err := r.Backfill(context.Background()); err == nil {
+		t.Fatal("backfill a medias: quiero error")
+	}
+	if len(st.upserted) != 1 || len(st.upserted[0]) != 1 {
+		t.Errorf("lo parcial no se persistió: upserted = %v", st.upserted)
+	}
+	fin := st.lastFinish(t)
+	if fin.status != store.SyncError || !strings.Contains(fin.errMsg, "HTTP 500") {
+		t.Errorf("cierre = %+v, quiero status error con el detalle", fin)
 	}
 }
 

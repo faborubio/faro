@@ -45,3 +45,11 @@ type IndicatorSource interface {
 	// Name identifica la fuente en sync_runs ("cmf", "mindicador").
 	Name() string
 }
+
+// HistoricalSource es la capacidad opcional de una fuente de entregar la serie
+// completa de un año (backfill del dashboard, CASE-006). El scheduler la
+// detecta por type assertion: una fuente sin histórico sigue siendo válida.
+type HistoricalSource interface {
+	// FetchYear trae todos los valores publicados de un indicador en un año.
+	FetchYear(ctx context.Context, code string, year int) ([]Snapshot, error)
+}
