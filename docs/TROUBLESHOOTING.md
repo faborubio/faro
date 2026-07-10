@@ -38,3 +38,24 @@ Formato de cada entrada: **síntoma**, **causa raíz**, **fix**, y para los grav
   `pg_advisory_lock` de sesión sobre la BD hasta el fin del test (`t.Cleanup`), serializando los
   paquetes. **Regla:** todo paquete nuevo con tests de integración debe obtener el DSN vía
   `testdb.Acquire`, nunca leyendo `FARO_TEST_DATABASE_URL` directo.
+
+## T-004 — Egress TCP bloqueado en VibeNest: el contenedor no alcanza a la CMF (2026-07-10)
+- **Síntoma:** primer deploy (Fase 2, paso 4): la app vive y sirve en `faro.vibenest.net`, pero
+  todo backfill/refresco muere en "error de red contra la CMF". Con timeouts por fase, la causa:
+  `dial tcp 152.230.198.x:443: i/o timeout` — el TCP connect jamás se establece.
+- **Cadena de diagnóstico** (en orden, cada paso descartó una hipótesis):
+  1. Key viva desde Chile: 200 en 0,3 s → no hay throttle de la key.
+  2. check-host.net desde Núremberg (AS24940, el mismo de Hetzner donde corre VibeNest), Los
+     Ángeles y São Paulo: la CMF responde en 1–3 s con y sin key → no hay geobloqueo ni bloqueo
+     de datacenter (reportes: `check-host.net/check-report/44141e5fk428` y `…/44149a71k413`).
+  3. El DNS del contenedor resuelve (Docker DNS delega en el host) y el dial muere por timeout →
+     el egress TCP de la red de contenedores (Coolify) está roto: NAT/masquerade ausente o
+     firewall del host.
+- **Fix:** del lado de la plataforma (ticket a soporte de VibeNest con la evidencia). Faro degrada
+  como fue diseñado: API y dashboard siguen sirviendo y cada fallo queda auditado en `sync_runs`
+  (ADR-003, SAD §8).
+- **Lo que el incidente mejoró del código:** (a) el error de red ahora propaga su causa interna
+  sin exponer jamás la key (`278f541`); (b) timeouts por fase en el transport — dial/TLS/headers —
+  porque el "Client.Timeout exceeded while awaiting headers" de Go no distingue la fase del cuelgue
+  (`79e928b`). Regla: **un adapter debe fallar diciendo la fase**; la censura de secretos se hace
+  quirúrgica (la causa interna del `*url.Error` es segura), no total.
