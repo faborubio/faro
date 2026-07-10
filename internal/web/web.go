@@ -68,16 +68,25 @@ func (s *Server) Handler() http.Handler {
 }
 
 // card es una tarjeta del dashboard: metadatos del catálogo + valor vigente
-// ya formateado (formato chileno, como la fuente — CASE-003).
+// ya formateado (formato chileno, como la fuente — CASE-003). RawValue viaja
+// aparte para el convertidor (JS necesita el número, no el string chileno).
 type card struct {
 	Code        string
 	Name        string
 	Unit        string
 	Description string
 	Cadence     string
-	Value       string // "" si el indicador aún no tiene valores
-	Date        string // YYYY-MM-DD
+	Value       string  // "" si el indicador aún no tiene valores
+	RawValue    float64 // valor sin formatear, para data-attributes
+	Date        string  // YYYY-MM-DD
 	HasValue    bool
+}
+
+// Convertible informa si la tarjeta entra al convertidor: unidades
+// denominadas en pesos con valor vigente (uf, dolar, utm — no el IPC, que
+// es una variación porcentual, no una unidad).
+func (c card) Convertible() bool {
+	return c.HasValue && c.Unit == "CLP"
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -119,14 +128,24 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 			return
 		default:
 			c.Value = formatCL(snap.Value, ind.Unit)
+			c.RawValue = snap.Value
 			c.Date = snap.Date.Format("2006-01-02")
 			c.HasValue = true
 		}
 		cards = append(cards, c)
 	}
 
+	hasConverter := false
+	for _, c := range cards {
+		if c.Convertible() {
+			hasConverter = true
+			break
+		}
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tmpl.Execute(w, map[string]any{"Cards": cards}); err != nil {
+	err = s.tmpl.Execute(w, map[string]any{"Cards": cards, "HasConverter": hasConverter})
+	if err != nil {
 		s.log.Error("dashboard: render", "error", err)
 	}
 }

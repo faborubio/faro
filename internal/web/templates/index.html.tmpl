@@ -63,6 +63,21 @@
     gap: 1.25rem;
     padding-bottom: 2rem;
   }
+  .converter { margin-bottom: 1.25rem; }
+  .conv-row { display: flex; align-items: center; gap: .6rem; margin-top: .7rem; flex-wrap: wrap; }
+  .conv-row input, .conv-row select, .conv-row button {
+    font: inherit;
+    color: var(--ink);
+    background: var(--plane);
+    border: 1px solid var(--ring);
+    border-radius: 8px;
+    padding: .45rem .6rem;
+  }
+  .conv-row input { width: 9rem; }
+  .conv-row button { cursor: pointer; }
+  .conv-row button:hover { border-color: var(--axis); }
+  .conv-row output { font-size: 1.3rem; font-weight: 600; }
+  .unit-out { font-size: .95rem; font-weight: 400; color: var(--ink-2); }
   .card {
     background: var(--surface);
     border: 1px solid var(--ring);
@@ -109,6 +124,24 @@
 </header>
 
 <main>
+  {{if .HasConverter}}
+  <section class="card converter" aria-label="Convertidor a pesos chilenos">
+    <h2>Convertidor</h2>
+    <form class="conv-row" id="conv" autocomplete="off">
+      <input id="conv-amount" type="number" value="1" min="0" step="any" inputmode="decimal"
+             aria-label="Cantidad a convertir">
+      <span id="conv-in-unit" class="unit-out" aria-hidden="true"></span>
+      <select id="conv-unit" aria-label="Unidad">
+        {{range .Cards}}{{if .Convertible}}
+        <option value="{{.RawValue}}" data-name="{{.Name}}" data-code="{{.Code}}">{{.Name}}</option>
+        {{end}}{{end}}
+      </select>
+      <button id="conv-swap" type="button" title="Invertir conversión" aria-label="Invertir conversión">⇄</button>
+      <output id="conv-result" for="conv-amount conv-unit" aria-live="polite"></output>
+    </form>
+    <p class="desc">Con los valores del día; referencial.</p>
+  </section>
+  {{end}}
   <div class="grid">
   {{range .Cards}}
     <section class="card" data-code="{{.Code}}" data-cadence="{{.Cadence}}" data-unit="{{.Unit}}">

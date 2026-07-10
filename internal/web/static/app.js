@@ -179,4 +179,44 @@
   for (const card of document.querySelectorAll(".card[data-code]")) {
     loadCard(card);
   }
+
+  // Convertidor: unidad → CLP (o al revés) con los valores del día que el
+  // server ya dejó en el <select>. Sin llamadas extra a la API.
+  const conv = document.getElementById("conv");
+  if (conv) {
+    const amount = document.getElementById("conv-amount");
+    const unit = document.getElementById("conv-unit");
+    const result = document.getElementById("conv-result");
+    const clp = new Intl.NumberFormat("es-CL", { maximumFractionDigits: 2 });
+    const inUnit = new Intl.NumberFormat("es-CL", { maximumFractionDigits: 4 });
+    let toCLP = true; // unidad → CLP; el swap lo invierte
+
+    function convert() {
+      const rate = parseFloat(unit.value);
+      const n = parseFloat(amount.value);
+      result.replaceChildren();
+      if (!isFinite(rate) || !isFinite(n)) return;
+      const name = unit.selectedOptions[0].dataset.name;
+      const value = document.createTextNode(
+        "= " + (toCLP ? clp.format(n * rate) : inUnit.format(n / rate)) + " ");
+      const label = document.createElement("span");
+      label.className = "unit-out";
+      label.textContent = toCLP ? "CLP" : name;
+      result.append(value, label);
+      // En modo invertido el input son pesos: la etiqueta "CLP" lo hace
+      // visible (en modo normal el <select> ya nombra la unidad).
+      document.getElementById("conv-in-unit").textContent = toCLP ? "" : "CLP →";
+      amount.setAttribute("aria-label",
+        "Cantidad en " + (toCLP ? name : "pesos chilenos"));
+    }
+
+    document.getElementById("conv-swap").addEventListener("click", () => {
+      toCLP = !toCLP;
+      convert();
+    });
+    amount.addEventListener("input", convert);
+    unit.addEventListener("change", convert);
+    conv.addEventListener("submit", (e) => e.preventDefault());
+    convert();
+  }
 })();

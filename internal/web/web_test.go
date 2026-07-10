@@ -69,6 +69,27 @@ func TestIndexRindeTarjetas(t *testing.T) {
 	if strings.Index(body, `data-code="uf"`) > strings.Index(body, `data-code="dolar"`) {
 		t.Error("el orden de tarjetas no respeta displayRank (uf primero)")
 	}
+	// El convertidor está, con el valor crudo (no el string chileno) por opción.
+	if !strings.Contains(body, `id="conv"`) || !strings.Contains(body, `value="40844.79"`) {
+		t.Error("falta el convertidor o sus valores crudos")
+	}
+}
+
+func TestConverterExcluyeElIPCYDesapareceSinValores(t *testing.T) {
+	// El IPC es un % (no convertible); y sin ningún valor CLP no hay convertidor.
+	st := &fakeStore{
+		catalog: []store.Indicator{
+			{Code: "ipc", Name: "IPC", Unit: "%", Cadence: indicator.CadenceMonthly},
+			{Code: "uf", Name: "Unidad de Fomento", Unit: "CLP", Cadence: indicator.CadenceDaily},
+		},
+		latest: map[string]indicator.Snapshot{
+			"ipc": {Code: "ipc", Value: 0.2, Date: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)},
+		},
+	}
+	body := get(t, New(st, nil).Handler(), "/").Body.String()
+	if strings.Contains(body, `id="conv"`) {
+		t.Error("hay convertidor sin unidades convertibles (solo IPC con valor)")
+	}
 }
 
 func TestIndexSinValoresNoRevienta(t *testing.T) {
