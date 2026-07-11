@@ -30,6 +30,15 @@ func (f *fakeStore) Latest(ctx context.Context, code string) (indicator.Snapshot
 	return indicator.Snapshot{}, store.ErrNotFound
 }
 
+func (f *fakeStore) GetIndicator(ctx context.Context, code string) (store.Indicator, error) {
+	for _, ind := range f.catalog {
+		if ind.Code == code {
+			return ind, nil
+		}
+	}
+	return store.Indicator{}, store.ErrNotFound
+}
+
 func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
@@ -130,6 +139,56 @@ func TestRutaDesconocidaEs404(t *testing.T) {
 	}
 }
 
+func TestWidgetRindeMiniCard(t *testing.T) {
+	st := &fakeStore{
+		catalog: []store.Indicator{
+			{Code: "uf", Name: "Unidad de Fomento", Unit: "CLP", Cadence: indicator.CadenceDaily},
+		},
+		latest: map[string]indicator.Snapshot{
+			"uf": {Code: "uf", Value: 40844.79, Date: time.Date(2026, 7, 9, 0, 0, 0, 0, time.UTC)},
+		},
+	}
+	rec := get(t, New(st, nil).Handler(), "/widget/uf")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /widget/uf = %d, quiero 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"Unidad de Fomento", "40.844,79", "al 2026-07-09", "CMF", "Faro",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("el widget no contiene %q", want)
+		}
+	}
+	// Embebible: cache corto y JAMÁS X-Frame-Options (el iframe es el punto).
+	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "max-age=300") {
+		t.Errorf("Cache-Control = %q, quiero max-age=300", cc)
+	}
+	if rec.Header().Get("X-Frame-Options") != "" {
+		t.Error("el widget manda X-Frame-Options: rompería los iframes")
+	}
+	// Autocontenido: sin scripts ni assets externos.
+	if strings.Contains(body, "<script") || strings.Contains(body, "/static/") {
+		t.Error("el widget carga assets: debe ser HTML autocontenido")
+	}
+}
+
+func TestWidgetSinValoresYDesconocido(t *testing.T) {
+	st := &fakeStore{catalog: []store.Indicator{
+		{Code: "uf", Name: "Unidad de Fomento", Unit: "CLP", Cadence: indicator.CadenceDaily},
+	}}
+	rec := get(t, New(st, nil).Handler(), "/widget/uf")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "aún sin datos") {
+		t.Errorf("widget sin valores = %d, quiero 200 con aviso", rec.Code)
+	}
+
+	rec = get(t, New(st, nil).Handler(), "/widget/bitcoin")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("GET /widget/bitcoin = %d, quiero 404", rec.Code)
+	}
+}
+
 func TestFormatCL(t *testing.T) {
 	cases := []struct {
 		v    float64
@@ -140,7 +199,7 @@ func TestFormatCL(t *testing.T) {
 		{935.71, "CLP", "935,71"},
 		{71649, "CLP", "71.649"},
 		{1234567.5, "CLP", "1.234.567,5"},
-		{0, "%", "0,0"}, // el 0,0 del IPC es un dato real (CASE-005)
+		{0, "%", "0,0"},     // el 0,0 del IPC es un dato real (CASE-005)
 		{-0.2, "%", "-0,2"}, // deflación
 	}
 	for _, tc := range cases {

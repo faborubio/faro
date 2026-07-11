@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Name}} — Faro</title>
+<style>
+  /* Mismos roles de color del dashboard (paleta validada); autocontenido:
+     el widget no carga assets externos — un iframe no debe traer nada más. */
+  :root {
+    --surface: #fcfcfb;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --ring: rgba(11, 11, 11, 0.10);
+    --beam: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface: #1a1a19;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --ring: rgba(255, 255, 255, 0.10);
+      --beam: #3987e5;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  a.widget {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: .15rem;
+    height: 100%;
+    padding: .7rem .9rem;
+    background: var(--surface);
+    border: 1px solid var(--ring);
+    border-radius: 10px;
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .head { display: flex; align-items: baseline; gap: .4rem; }
+  .name { font-weight: 600; }
+  .brand { margin-left: auto; color: var(--muted); font-size: .8rem; white-space: nowrap; }
+  .brand .beam { color: var(--beam); }
+  .value { font-size: 1.6rem; font-weight: 600; line-height: 1.15; font-variant-numeric: tabular-nums; }
+  .value small { font-size: .8rem; font-weight: 400; color: var(--ink-2); }
+  .date { color: var(--muted); font-size: .78rem; }
+  .empty { color: var(--muted); }
+</style>
+</head>
+<body>
+<a class="widget" href="/" target="_blank" rel="noopener" title="Ver todos los indicadores en Faro">
+  <span class="head"><span class="name">{{.Name}}</span><span class="brand"><span class="beam">◗</span> Faro</span></span>
+  {{if .HasValue}}
+  <span class="value">{{.Value}} <small>{{.Unit}}</small></span>
+  <span class="date">al {{.Date}} · fuente CMF</span>
+  {{else}}
+  <span class="empty">aún sin datos</span>
+  {{end}}
+</a>
+</body>
+</html>

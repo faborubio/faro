@@ -87,6 +87,29 @@ Formato de cada caso: **síntoma observado**, **por qué pasa**, **cómo lo trat
   valor futuro de la UF es una curiosidad de la fuente, no parte del producto: el histórico de Faro
   termina hoy.
 
+## CASE-007 — "Cruzar un umbral" tiene tres bordes que no son cruce
+- **Contexto (Fase 3, ADR-006):** una alerta "avísame si el dólar cruza $1.000" dispara cuando el
+  valor nuevo satisface la condición **y el anterior no** (edge-triggered). Al implementarla
+  aparecieron tres bordes donde "satisface la condición" NO significa "cruzó":
+  1. **Se mantiene cruzado:** el dólar lleva una semana sobre $1.000 → cada día nuevo satisface,
+     pero solo el primer día fue noticia. Sin la comparación contra el valor anterior, la alerta
+     bombardearía el webhook a diario.
+  2. **Ciclo sin valor nuevo:** fin de semana o indicador mensual → el refresco trae lo ya
+     conocido (0 upserts). Evaluar igual re-dispararía el último cruce en cada tick. Por eso la
+     evaluación se gatilla **solo** con los snapshots que el upsert reportó como cambiados
+     (la señal del ADR-011).
+  3. **Corrección histórica (cazado en la ronda crítica):** la fuente re-emite un valor VIEJO
+     corregido (ayer: 995 → 1001) cuando hoy (1005) ya existe. El snapshot cambiado satisface la
+     condición contra su anterior… pero el valor **vigente** no se movió: alertar con el dato de
+     ayer sería mentir. El evaluador verifica que el snapshot evaluado **sea** el último del
+     indicador antes de comparar.
+- **Borde asumido con decisión explícita:** primer valor de un indicador sin historia (catálogo
+  recién estrenado) con la condición ya cierta → **dispara**. No hay valor anterior que diga "ya
+  estaba ahí", y quien registró la alerta pidió saber. Documentado en el código y con test.
+- **Cómo lo trata Faro:** `internal/alert` con tests por cada borde (incluido umbral 0 — CASE-005:
+  el cero jamás es centinela). `last_triggered_at` es auditoría de entregas, no parte de la
+  semántica: el no-re-disparo lo da el cruce, no el timestamp.
+
 ---
 
 *Cada caso nuevo del dominio entra aquí **antes** de tocar heurística o configuración.*

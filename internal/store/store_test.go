@@ -82,8 +82,8 @@ func TestUpsertAndLatest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upsert inicial: %v", err)
 	}
-	if changed != 2 {
-		t.Errorf("changed = %d, quiero 2", changed)
+	if len(changed) != 2 {
+		t.Errorf("changed = %d snapshots, quiero 2", len(changed))
 	}
 
 	got, err := s.Latest(ctx, "dolar")
@@ -101,8 +101,8 @@ func TestUpsertAndLatest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upsert repetido: %v", err)
 	}
-	if changed != 0 {
-		t.Errorf("upsert idéntico: changed = %d, quiero 0", changed)
+	if len(changed) != 0 {
+		t.Errorf("upsert idéntico: changed = %d snapshots, quiero 0", len(changed))
 	}
 
 	// Corrección del mismo día: 1 cambio y el histórico no crece.
@@ -112,8 +112,8 @@ func TestUpsertAndLatest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upsert corrección: %v", err)
 	}
-	if changed != 1 {
-		t.Errorf("corrección: changed = %d, quiero 1", changed)
+	if len(changed) != 1 || changed[0].Value != 946.00 {
+		t.Errorf("corrección: changed = %+v, quiero exactamente el snapshot corregido", changed)
 	}
 	got, err = s.Latest(ctx, "dolar")
 	if err != nil {
@@ -193,8 +193,8 @@ func TestUpsertUnknownCodeIsPartial(t *testing.T) {
 	if err == nil {
 		t.Fatal("upsert con código fuera del catálogo: quiero error")
 	}
-	if changed != 1 {
-		t.Errorf("changed = %d, quiero 1 (lo persistido antes del fallo)", changed)
+	if len(changed) != 1 {
+		t.Errorf("changed = %d snapshots, quiero 1 (lo persistido antes del fallo)", len(changed))
 	}
 	if _, err := s.Latest(ctx, "dolar"); err != nil {
 		t.Errorf("el snapshot válido debió persistir: %v", err)
@@ -231,6 +231,93 @@ func TestCatalog(t *testing.T) {
 	_, err = s.GetIndicator(ctx, "noexiste")
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("GetIndicator(noexiste): err = %v, quiero ErrNotFound", err)
+	}
+}
+
+func TestPreviousValue(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+
+	_, err := s.UpsertSnapshots(ctx, []indicator.Snapshot{
+		{Code: "dolar", Value: 943.15, Date: date(2026, 7, 7)},
+		{Code: "dolar", Value: 945.80, Date: date(2026, 7, 8)},
+		{Code: "dolar", Value: 950.10, Date: date(2026, 7, 9)},
+	})
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	prev, err := s.PreviousValue(ctx, "dolar", date(2026, 7, 9))
+	if err != nil {
+		t.Fatalf("PreviousValue: %v", err)
+	}
+	if prev.Value != 945.80 || !prev.Date.Equal(date(2026, 7, 8)) {
+		t.Errorf("PreviousValue = %+v, quiero 945.80 del 2026-07-08", prev)
+	}
+
+	// Antes del primer valor no hay anterior: ErrNotFound (la semántica
+	// "sin anterior" de las alertas).
+	_, err = s.PreviousValue(ctx, "dolar", date(2026, 7, 7))
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("PreviousValue sin anterior: err = %v, quiero ErrNotFound", err)
+	}
+}
+
+func TestAlertLifecycle(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+
+	created, err := s.CreateAlert(ctx, "tok-abc", "dolar", store.OpGreater, 1000, "https://example.com/hook")
+	if err != nil {
+		t.Fatalf("CreateAlert: %v", err)
+	}
+	if created.ID == 0 || !created.Active || !created.LastTriggeredAt.IsZero() {
+		t.Errorf("alerta creada = %+v, quiero activa, con id y sin disparos", created)
+	}
+
+	got, err := s.GetAlertByToken(ctx, "tok-abc")
+	if err != nil {
+		t.Fatalf("GetAlertByToken: %v", err)
+	}
+	if got.IndicatorCode != "dolar" || got.Operator != store.OpGreater || got.Threshold != 1000 {
+		t.Errorf("GetAlertByToken = %+v, no coincide con lo creado", got)
+	}
+
+	if _, err := s.GetAlertByToken(ctx, "tok-noexiste"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("token desconocido: err = %v, quiero ErrNotFound", err)
+	}
+
+	// Solo las activas del indicador entran a la evaluación.
+	if _, err := s.CreateAlert(ctx, "tok-uf", "uf", store.OpLess, 40000, "https://example.com/hook"); err != nil {
+		t.Fatalf("CreateAlert uf: %v", err)
+	}
+	active, err := s.ListActiveAlertsByCode(ctx, "dolar")
+	if err != nil {
+		t.Fatalf("ListActiveAlertsByCode: %v", err)
+	}
+	if len(active) != 1 || active[0].Token != "tok-abc" {
+		t.Errorf("activas de dolar = %+v, quiero solo tok-abc", active)
+	}
+
+	if err := s.MarkAlertTriggered(ctx, created.ID); err != nil {
+		t.Fatalf("MarkAlertTriggered: %v", err)
+	}
+	got, err = s.GetAlertByToken(ctx, "tok-abc")
+	if err != nil {
+		t.Fatalf("GetAlertByToken tras disparo: %v", err)
+	}
+	if got.LastTriggeredAt.IsZero() {
+		t.Error("last_triggered_at sigue en cero tras MarkAlertTriggered")
+	}
+
+	if err := s.DeleteAlertByToken(ctx, "tok-abc"); err != nil {
+		t.Fatalf("DeleteAlertByToken: %v", err)
+	}
+	if _, err := s.GetAlertByToken(ctx, "tok-abc"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("alerta borrada sigue existiendo: err = %v", err)
+	}
+	if err := s.DeleteAlertByToken(ctx, "tok-abc"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("borrar dos veces: err = %v, quiero ErrNotFound", err)
 	}
 }
 

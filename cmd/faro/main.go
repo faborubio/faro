@@ -18,12 +18,15 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/faborubio/faro/internal/alert"
 	"github.com/faborubio/faro/internal/api"
 	"github.com/faborubio/faro/internal/migrate"
+	"github.com/faborubio/faro/internal/ratelimit"
 	"github.com/faborubio/faro/internal/refresh"
 	"github.com/faborubio/faro/internal/source/cmf"
 	"github.com/faborubio/faro/internal/store"
 	"github.com/faborubio/faro/internal/web"
+	"github.com/faborubio/faro/internal/webhook"
 	"github.com/faborubio/faro/migrations"
 )
 
@@ -79,17 +82,42 @@ func run() error {
 
 	st := store.New(pool)
 	source := cmf.New(apiKey)
-	refresher := refresh.New(source, st, interval, slog.Default())
+
+	// Alertas (ADR-006): el scheduler notifica los valores que cambiaron y el
+	// evaluador dispara los webhooks que cruzan umbral. El escape de redes
+	// privadas es SOLO para dev (docs/SECURITY.md).
+	allowPrivate := os.Getenv("FARO_WEBHOOK_ALLOW_PRIVATE") == "1"
+	if allowPrivate {
+		slog.Warn("FARO_WEBHOOK_ALLOW_PRIVATE=1: el anti-SSRF de webhooks está APAGADO — solo aceptable en desarrollo")
+	}
+	hook := webhook.New(allowPrivate)
+	alerts := alert.New(st, hook, slog.Default())
+	refresher := refresh.New(source, st, interval, slog.Default()).WithNotifier(alerts)
 
 	// API y dashboard comparten binario y puerto: /api/* va a la API JSON,
-	// el resto (portada + assets) al dashboard (ADR-005).
+	// el resto (portada + widgets + assets) al dashboard (ADR-005).
 	mux := http.NewServeMux()
-	mux.Handle("/api/", api.New(st, 0, slog.Default()).Handler())
+	mux.Handle("/api/", api.New(st, 0, slog.Default()).WithURLValidator(hook).Handler())
 	mux.Handle("/", web.New(st, slog.Default()).Handler())
+
+	// Rate limiting por IP (ADR-010) sobre todo lo público. /healthz queda
+	// fuera: el health check de la plataforma no compite con los clientes.
+	limiter := ratelimit.New(5, 30, 4096) // 5 req/s, ráfaga 30 (una carga del dashboard ≈ 11)
+	root := http.NewServeMux()
+	root.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := pool.Ping(ctx); err != nil {
+			http.Error(w, "sin base de datos", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte("ok"))
+	})
+	root.Handle("/", limiter.Middleware(mux))
 
 	server := &http.Server{
 		Addr:              ":" + port,
-		Handler:           mux,
+		Handler:           root,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

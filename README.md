@@ -10,8 +10,8 @@ de la fuente oficial (CMF), histórico, alertas por webhook y widgets embebibles
 > rápido, con histórico y desde la fuente autoritativa.
 
 **Estado: 🟢 en producción — [faro.vibenest.net](https://faro.vibenest.net/).** Dashboard con
-tendencias y convertidor a pesos, API JSON con histórico desde 2025, imagen Docker de 19 MB.
-Siguiente: Fase 3 — alertas por webhook y widgets. Ver [roadmap](#roadmap).
+tendencias y convertidor a pesos, API JSON con histórico desde 2025, **alertas por webhook,
+widgets embebibles**, rate limiting + CORS, imagen Docker de 19 MB. Ver [roadmap](#roadmap).
 
 ---
 
@@ -26,8 +26,8 @@ términos claros) y **autoridad** (fuentes oficiales, incómodas de consumir). F
   desde la fuente; ninguna request espera por ella).
 - 📊 **Dashboard con tendencias** — Chart.js, server-rendered, todo embebido en el binario, y un
   **convertidor** UF/dólar/UTM ↔ pesos con los valores del día.
-- 🔔 **Alertas por webhook** *(Fase 3)* — *"avísame si el dólar cruza $1.000"* → POST a Slack/Discord/n8n.
-- 🧩 **Widgets embebibles** *(Fase 3)* — el valor del día en cualquier web con un `<iframe>`/snippet.
+- 🔔 **Alertas por webhook** — *"avísame si el dólar cruza $1.000"* → POST a Slack/Discord/n8n.
+- 🧩 **Widgets embebibles** — el valor del día en cualquier web con un `<iframe>`/snippet.
 - 🏛️ **Fuente oficial** — API de la **CMF** (Comisión para el Mercado Financiero), con API key.
 
 ## Arquitectura en una línea
@@ -63,6 +63,59 @@ Códigos v1: `uf` · `dolar` · `utm` · `ipc`. Un código desconocido responde 
 un rango malformado, `400`. Las respuestas salen de Postgres con cache en memoria (TTL 60 s,
 observable en el header `X-Cache`) — ninguna request espera por la CMF.
 
+La API tiene **CORS abierto** (consumible por fetch desde cualquier web) y **rate limiting** por
+IP (ráfagas acotadas; al exceder: `429` + `Retry-After`). Postura completa en
+[docs/SECURITY.md](docs/SECURITY.md).
+
+### Alertas por webhook
+
+*"Avísame si el dólar cruza $1.000"*: se registra sin cuenta y devuelve un **token** — la única
+llave para consultar o borrar la alerta (guárdalo). Dispara **al cruzar** el umbral (no re-notifica
+mientras se mantenga) con un POST JSON al `webhook_url` (Slack/Discord/n8n/lo que sea).
+
+```bash
+# Registrar (operator: gt = supera el umbral, lt = cae bajo él)
+$ curl -X POST https://faro.vibenest.net/api/alerts \
+    -H 'Content-Type: application/json' \
+    -d '{"indicator":"dolar","operator":"gt","threshold":1000,"webhook_url":"https://hooks.slack.com/…"}'
+{"token":"7a30f7…","indicator":"dolar","operator":"gt","threshold":1000,…}
+
+$ curl https://faro.vibenest.net/api/alerts/<token>      # consultar (incluye last_triggered_at)
+$ curl -X DELETE https://faro.vibenest.net/api/alerts/<token>   # borrar (204)
+```
+
+El payload que recibe el webhook:
+
+```json
+{"indicator":"dolar","name":"Dólar observado","unit":"CLP","operator":"gt",
+ "threshold":1000,"value":1005.3,"date":"2026-07-10",
+ "message":"Dólar observado superó el umbral 1000: valor 1005.3 (2026-07-10)"}
+```
+
+La `webhook_url` debe ser pública (http/https): loopback, redes privadas y metadata de clouds se
+rechazan con `400` — anti-SSRF en dos capas, ver [docs/SECURITY.md](docs/SECURITY.md).
+
+### Embeber el valor en tu web
+
+**Widget** (mini-card autocontenida, claro/oscuro automático, sin JS):
+
+```html
+<iframe src="https://faro.vibenest.net/widget/dolar"
+        width="220" height="90" style="border:0" title="Dólar observado — Faro"></iframe>
+```
+
+**Snippet JS** contra la API (CORS abierto):
+
+```html
+<span id="dolar"></span>
+<script>
+  fetch("https://faro.vibenest.net/api/dolar")
+    .then(r => r.json())
+    .then(d => document.getElementById("dolar").textContent =
+      `$${d.value.toLocaleString("es-CL")} (${d.date})`);
+</script>
+```
+
 ## Stack
 
 | Capa | Elección | Por qué |
@@ -80,7 +133,7 @@ observable en el header `X-Cache`) — ninguna request espera por la CMF.
 | **0 — Cimientos** | gates (legal · API key · viabilidad) · scaffold · Postgres · adapter CMF testeado · CI | ✅ |
 | **1 — Núcleo** | scheduler + histórico + API (actual e histórico) + cache | ✅ |
 | **2 — Dashboard + deploy** | Chart.js embebido · convertidor · Dockerfile 19 MB · **[URL pública viva](https://faro.vibenest.net/)** | ✅ |
-| **3 — Distribución** | alertas webhook · widgets embebibles · rate limiting · CORS | 🚧 siguiente |
+| **3 — Distribución** | alertas webhook (cruce + anti-SSRF) · widgets embebibles · rate limiting · CORS · `/healthz` | ✅ |
 | **4 — Robustez** *(solo con tracción)* | fallback mindicador.cl/BCCh · OpenAPI · métricas | ⏳ |
 
 ## Desarrollo
@@ -113,6 +166,7 @@ visible y cada fase cierra con una *Definition of Done*.
 | [SAD-Faro.md](SAD-Faro.md) | ¿Cómo está diseñado y por qué? — la fuente de verdad (ADRs, trade-offs) |
 | [CLAUDE.md](CLAUDE.md) | ¿Cómo retomo el proyecto en 5 minutos? |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | ¿Cómo se construye y despliega? (imagen, ENV, VibeNest) |
+| [docs/SECURITY.md](docs/SECURITY.md) | ¿De qué me protejo y cómo? (anti-SSRF, tokens, rate limiting, CORS) |
 | [docs/AUDIT.md](docs/AUDIT.md) | ¿Qué deuda técnica acepté y cómo se paga? |
 | [docs/CASES.md](docs/CASES.md) | ¿Qué casos raros del dominio encontré? (con datos reales) |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | ¿Qué falló y cómo se arregló? |

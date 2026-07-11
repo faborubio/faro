@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -23,6 +24,7 @@ type fakeStore struct {
 	calls   int
 	catalog map[string]store.Indicator
 	values  map[string][]indicator.Snapshot // ascendente por fecha
+	alerts  map[string]store.Alert          // por token (métodos en alerts_test.go)
 }
 
 func (f *fakeStore) bump() {
@@ -103,6 +105,35 @@ func get(t *testing.T, url string) (*http.Response, []byte) {
 		t.Fatalf("leyendo cuerpo: %v", err)
 	}
 	return resp, body
+}
+
+func TestCORSAbierto(t *testing.T) {
+	// ADR-010: la API se consume por fetch desde cualquier origen (widgets,
+	// snippets embebidos). GET lleva el header; el preflight responde 204.
+	ts, _ := newTestServer(t, 0)
+
+	resp, _ := get(t, ts.URL+"/api/dolar")
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Errorf("GET Access-Control-Allow-Origin = %q, quiero *", got)
+	}
+
+	req, _ := http.NewRequest(http.MethodOptions, ts.URL+"/api/alerts", nil)
+	req.Header.Set("Origin", "https://ejemplo.cl")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	presp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("OPTIONS: %v", err)
+	}
+	presp.Body.Close()
+	if presp.StatusCode != http.StatusNoContent {
+		t.Fatalf("preflight = %d, quiero 204", presp.StatusCode)
+	}
+	if methods := presp.Header.Get("Access-Control-Allow-Methods"); !strings.Contains(methods, "POST") {
+		t.Errorf("Allow-Methods = %q, quiero que incluya POST", methods)
+	}
+	if hdrs := presp.Header.Get("Access-Control-Allow-Headers"); !strings.Contains(hdrs, "Content-Type") {
+		t.Errorf("Allow-Headers = %q, quiero Content-Type", hdrs)
+	}
 }
 
 func TestCurrent(t *testing.T) {

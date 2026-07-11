@@ -20,6 +20,7 @@ import (
 
 	"github.com/faborubio/faro/internal/indicator"
 	"github.com/faborubio/faro/internal/store"
+	"github.com/faborubio/faro/internal/webhook"
 )
 
 // dateFmt es el formato de fechas de la API (query params y respuestas).
@@ -38,14 +39,18 @@ type Store interface {
 	Latest(ctx context.Context, code string) (indicator.Snapshot, error)
 	History(ctx context.Context, code string, from, to time.Time) ([]indicator.Snapshot, error)
 	GetIndicator(ctx context.Context, code string) (store.Indicator, error)
+	CreateAlert(ctx context.Context, token, code string, op store.Operator, threshold float64, webhookURL string) (store.Alert, error)
+	GetAlertByToken(ctx context.Context, token string) (store.Alert, error)
+	DeleteAlertByToken(ctx context.Context, token string) error
 }
 
 // Server arma el handler HTTP de la API. Crear con New.
 type Server struct {
-	store Store
-	ttl   time.Duration
-	log   *slog.Logger
-	now   func() time.Time // inyectable en tests (default de /history)
+	store     Store
+	ttl       time.Duration
+	log       *slog.Logger
+	now       func() time.Time // inyectable en tests (default de /history)
+	validator URLValidator     // anti-SSRF de webhook_url (SAD §8)
 
 	mu    sync.Mutex
 	cache map[string]cacheEntry
@@ -66,20 +71,63 @@ func New(st Store, ttl time.Duration, log *slog.Logger) *Server {
 		log = slog.Default()
 	}
 	return &Server{
-		store: st,
-		ttl:   ttl,
-		log:   log,
-		now:   time.Now,
-		cache: make(map[string]cacheEntry),
+		store:     st,
+		ttl:       ttl,
+		log:       log,
+		now:       time.Now,
+		validator: webhook.New(false), // default seguro; cmd/faro inyecta el suyo
+		cache:     make(map[string]cacheEntry),
 	}
 }
 
+// WithURLValidator reemplaza el validador de webhook_url (cmd/faro inyecta el
+// cliente compartido con el despachador; en tests, un fake). Devuelve el mismo
+// Server para encadenar.
+func (s *Server) WithURLValidator(v URLValidator) *Server {
+	s.validator = v
+	return s
+}
+
 // Handler devuelve el http.Handler con las rutas de la API montadas.
+//
+// Las alertas viven en un sub-mux propio: el patrón `GET /api/alerts/{token}`
+// conflictúa con `GET /api/{code}/history` en un mismo ServeMux (ambos
+// matchean /api/alerts/history y ninguno es más específico → panic al
+// registrar). El prefijo literal /api/alerts/ sí es más específico que /api/,
+// así que el mux externo separa los mundos sin ambigüedad.
 func (s *Server) Handler() http.Handler {
+	alerts := http.NewServeMux()
+	alerts.HandleFunc("POST /api/alerts", s.handleCreateAlert)
+	alerts.HandleFunc("GET /api/alerts/{token}", s.handleGetAlert)
+	alerts.HandleFunc("DELETE /api/alerts/{token}", s.handleDeleteAlert)
+
+	indicators := http.NewServeMux()
+	indicators.HandleFunc("GET /api/{code}", s.handleCurrent)
+	indicators.HandleFunc("GET /api/{code}/history", s.handleHistory)
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/{code}", s.handleCurrent)
-	mux.HandleFunc("GET /api/{code}/history", s.handleHistory)
-	return mux
+	mux.Handle("/api/alerts", alerts)
+	mux.Handle("/api/alerts/", alerts)
+	mux.Handle("/api/", indicators)
+	return cors(mux)
+}
+
+// cors abre la API a browsers de terceros (ADR-010): los widgets y snippets
+// embebidos consumen /api/* por fetch desde cualquier origen — es el producto,
+// no un descuido; el rate limiting acota el abuso. El preflight OPTIONS se
+// responde aquí (204) sin llegar al mux, que no lo conoce.
+func cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if r.Method == http.MethodOptions {
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.Header().Set("Access-Control-Max-Age", "86400")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // currentResponse es el valor vigente de un indicador con sus metadatos.

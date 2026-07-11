@@ -57,6 +57,7 @@ var displayRank = map[string]int{"uf": 0, "dolar": 1, "utm": 2, "ipc": 3}
 type Store interface {
 	ListIndicators(ctx context.Context) ([]store.Indicator, error)
 	Latest(ctx context.Context, code string) (indicator.Snapshot, error)
+	GetIndicator(ctx context.Context, code string) (store.Indicator, error)
 }
 
 // Server sirve el dashboard. Crear con New.
@@ -74,12 +75,13 @@ func New(st Store, log *slog.Logger) *Server {
 	return &Server{
 		store: st,
 		log:   log,
-		tmpl:  template.Must(template.ParseFS(assets, "templates/index.html.tmpl")),
+		tmpl:  template.Must(template.ParseFS(assets, "templates/*.tmpl")),
 	}
 }
 
-// Handler devuelve el http.Handler del dashboard: la portada y los assets
-// estáticos. Cualquier otra ruta es 404 (la API vive en su propio handler).
+// Handler devuelve el http.Handler del dashboard: la portada, el widget
+// embebible (ADR-007) y los assets estáticos. Cualquier otra ruta es 404 (la
+// API vive en su propio handler).
 func (s *Server) Handler() http.Handler {
 	static, err := fs.Sub(assets, "static")
 	if err != nil {
@@ -87,6 +89,7 @@ func (s *Server) Handler() http.Handler {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handleIndex)
+	mux.HandleFunc("GET /widget/{code}", s.handleWidget)
 	mux.Handle("GET /static/", http.StripPrefix("/static/",
 		cacheStatic(http.FileServerFS(static))))
 	return mux
@@ -169,13 +172,53 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	err = s.tmpl.Execute(w, map[string]any{
+	err = s.tmpl.ExecuteTemplate(w, "index.html.tmpl", map[string]any{
 		"Cards":        cards,
 		"HasConverter": hasConverter,
 		"AssetV":       assetVersion,
 	})
 	if err != nil {
 		s.log.Error("dashboard: render", "error", err)
+	}
+}
+
+// handleWidget sirve la mini-card embebible de un indicador (ADR-007): HTML
+// autocontenido (CSS inline, sin JS) pensado para un <iframe> en sitios de
+// terceros. No manda X-Frame-Options — embeberlo es el punto — y cachea 5 min:
+// el dato cambia 1×/día, pero un valor corregido no debe pegarse por horas en
+// miles de embeds.
+func (s *Server) handleWidget(w http.ResponseWriter, r *http.Request) {
+	code := r.PathValue("code")
+	ind, err := s.store.GetIndicator(r.Context(), code)
+	if errors.Is(err, store.ErrNotFound) {
+		http.Error(w, "indicador desconocido", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		s.log.Error("widget: catálogo", "code", code, "error", err)
+		http.Error(w, "error interno", http.StatusInternalServerError)
+		return
+	}
+
+	c := card{Code: ind.Code, Name: ind.Name, Unit: ind.Unit}
+	snap, err := s.store.Latest(r.Context(), ind.Code)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		// Sin valores aún: el widget lo dice en vez de romperse.
+	case err != nil:
+		s.log.Error("widget: último valor", "code", code, "error", err)
+		http.Error(w, "error interno", http.StatusInternalServerError)
+		return
+	default:
+		c.Value = formatCL(snap.Value, ind.Unit)
+		c.Date = snap.Date.Format("2006-01-02")
+		c.HasValue = true
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	if err := s.tmpl.ExecuteTemplate(w, "widget.html.tmpl", c); err != nil {
+		s.log.Error("widget: render", "error", err)
 	}
 }
 

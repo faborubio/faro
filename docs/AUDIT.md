@@ -102,6 +102,24 @@ pago** (cómo y cuándo se salda).
   automático y en `sync_runs` la vuelta a la normalidad; cerrar esta entrada con esa evidencia.
   Si el ticket muere sin fix: evaluar mover el refresco fuera del contenedor (GitHub Actions
   cron contra la BD, aceptando exponer el Postgres con TLS) o cambiar de plataforma.
+- **Nota (Fase 3, 2026-07-10):** el egress roto ahora bloquea **dos** cosas en prod: el refresco
+  desde la CMF **y el disparo de webhooks de alertas** (mismo camino de salida). Las alertas
+  registradas en prod quedan latentes hasta el fix; localmente el ciclo completo está verificado
+  E2E (cruce real → POST entregado).
+
+## AUD-006 — Webhooks sin reintentos ni auto-desactivación de receptores muertos
+- **Estado:** abierta (aceptada en Fase 3, 2026-07-10).
+- **Contexto:** el disparo de una alerta es un único POST con timeout de 10 s (ADR-006). Si el
+  receptor está caído justo en el cruce, la notificación se pierde: no hay cola ni reintento
+  (`last_triggered_at` no se marca y el log deja `webhook no entregado`). Y una alerta cuyo
+  receptor murió para siempre se seguirá intentando en cada cruce futuro — la columna `active`
+  existe para auto-desactivarlas, pero nada la apaga todavía.
+- **Atajo aceptado:** a esta escala un cruce es un evento raro (días o semanas entre disparos) y
+  el costo de perder uno es bajo; una cola de reintentos es infraestructura que el volumen no
+  justifica (proporcionalidad, SAD §2.1). El POST fallido queda observable en el log.
+- **Plan de pago:** en Fase 4 (solo con tracción): reintento simple con backoff (2–3 intentos) y
+  auto-desactivación tras N fallas consecutivas (columna `active`, que ya filtra el índice y la
+  evaluación). Calibrar N con evidencia real de fallas en el log — CASES primero (regla 3).
 
 ---
 

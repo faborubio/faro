@@ -10,6 +10,58 @@ import (
 	"time"
 )
 
+const createAlert = `-- name: CreateAlert :one
+INSERT INTO alerts (token, indicator_code, operator, threshold, webhook_url)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, token, indicator_code, operator, threshold, webhook_url, active, last_triggered_at, created_at
+`
+
+type CreateAlertParams struct {
+	Token         string
+	IndicatorCode string
+	Operator      string
+	Threshold     float64
+	WebhookUrl    string
+}
+
+// El token opaco lo genera la app (crypto/rand); la webhook_url llega ya
+// validada (anti-SSRF, SAD §8). active nace true; el DELETE borra la fila.
+func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (Alert, error) {
+	row := q.db.QueryRow(ctx, createAlert,
+		arg.Token,
+		arg.IndicatorCode,
+		arg.Operator,
+		arg.Threshold,
+		arg.WebhookUrl,
+	)
+	var i Alert
+	err := row.Scan(
+		&i.ID,
+		&i.Token,
+		&i.IndicatorCode,
+		&i.Operator,
+		&i.Threshold,
+		&i.WebhookUrl,
+		&i.Active,
+		&i.LastTriggeredAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const deleteAlertByToken = `-- name: DeleteAlertByToken :execrows
+DELETE FROM alerts
+WHERE token = $1
+`
+
+func (q *Queries) DeleteAlertByToken(ctx context.Context, token string) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAlertByToken, token)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const finishSyncRun = `-- name: FinishSyncRun :exec
 UPDATE sync_runs
 SET finished_at        = now(),
@@ -34,6 +86,29 @@ func (q *Queries) FinishSyncRun(ctx context.Context, arg FinishSyncRunParams) er
 		arg.ID,
 	)
 	return err
+}
+
+const getAlertByToken = `-- name: GetAlertByToken :one
+SELECT id, token, indicator_code, operator, threshold, webhook_url, active, last_triggered_at, created_at
+FROM alerts
+WHERE token = $1
+`
+
+func (q *Queries) GetAlertByToken(ctx context.Context, token string) (Alert, error) {
+	row := q.db.QueryRow(ctx, getAlertByToken, token)
+	var i Alert
+	err := row.Scan(
+		&i.ID,
+		&i.Token,
+		&i.IndicatorCode,
+		&i.Operator,
+		&i.Threshold,
+		&i.WebhookUrl,
+		&i.Active,
+		&i.LastTriggeredAt,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const getIndicator = `-- name: GetIndicator :one
@@ -118,6 +193,45 @@ func (q *Queries) LatestValue(ctx context.Context, indicatorCode string) (Latest
 	return i, err
 }
 
+const listActiveAlertsByCode = `-- name: ListActiveAlertsByCode :many
+SELECT id, token, indicator_code, operator, threshold, webhook_url, active, last_triggered_at, created_at
+FROM alerts
+WHERE indicator_code = $1
+  AND active
+ORDER BY id
+`
+
+// Solo las activas: usa el índice parcial alerts_active_by_indicator.
+func (q *Queries) ListActiveAlertsByCode(ctx context.Context, indicatorCode string) ([]Alert, error) {
+	rows, err := q.db.Query(ctx, listActiveAlertsByCode, indicatorCode)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Alert
+	for rows.Next() {
+		var i Alert
+		if err := rows.Scan(
+			&i.ID,
+			&i.Token,
+			&i.IndicatorCode,
+			&i.Operator,
+			&i.Threshold,
+			&i.WebhookUrl,
+			&i.Active,
+			&i.LastTriggeredAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIndicators = `-- name: ListIndicators :many
 SELECT code, name, unit, description, cadence
 FROM indicators
@@ -148,6 +262,47 @@ func (q *Queries) ListIndicators(ctx context.Context) ([]Indicator, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const markAlertTriggered = `-- name: MarkAlertTriggered :exec
+UPDATE alerts
+SET last_triggered_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) MarkAlertTriggered(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markAlertTriggered, id)
+	return err
+}
+
+const previousValue = `-- name: PreviousValue :one
+SELECT indicator_code, date, value
+FROM indicator_values
+WHERE indicator_code = $1
+  AND date < $2
+ORDER BY date DESC
+LIMIT 1
+`
+
+type PreviousValueParams struct {
+	IndicatorCode string
+	Date          time.Time
+}
+
+type PreviousValueRow struct {
+	IndicatorCode string
+	Date          time.Time
+	Value         float64
+}
+
+// El valor inmediatamente anterior a una fecha: la otra mitad de la semántica
+// de cruce de las alertas (ADR-006) — se dispara cuando el valor nuevo
+// satisface la condición y el anterior no.
+func (q *Queries) PreviousValue(ctx context.Context, arg PreviousValueParams) (PreviousValueRow, error) {
+	row := q.db.QueryRow(ctx, previousValue, arg.IndicatorCode, arg.Date)
+	var i PreviousValueRow
+	err := row.Scan(&i.IndicatorCode, &i.Date, &i.Value)
+	return i, err
 }
 
 const startSyncRun = `-- name: StartSyncRun :one

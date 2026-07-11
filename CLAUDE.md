@@ -22,16 +22,18 @@ Chart.js embebido con `go:embed` · Docker (imagen mínima) · Deploy en VibeNes
 disciplina de fases heredadas de Oteo/FleetPilot.
 
 ## Estado actual
-**Fase 2 — Dashboard + deploy: CERRADA (DoD completo). Siguiente: Fase 3 — Distribución.**
+**Fase 3 — Distribución: CERRADA (DoD completo). Siguiente: Fase 4 — Robustez, SOLO con
+tracción real (SAD §13); mientras tanto, pagar pendientes (abajo) y observar uso.**
 Repo público: `github.com/faborubio/faro` (remote HTTPS). SAD en 1.2.0.
 **URL pública viva: `https://faro.vibenest.net/`** (VibeNest sobre Coolify, Hetzner).
 
-**⚠️ Lo único cojo: el refresco automático en prod (AUD-005 / T-004).** El egress TCP de la red
-de contenedores de VibeNest está roto → el scheduler no alcanza a la CMF; ticket enviado
-(2026-07-10). Los datos de prod se sembraron por la consola SQL del panel (receta en
-`docs/DEPLOY.md`) y envejecen 1 día/día hasta que VibeNest arregle; cuando lo haga, el
-scheduler retoma solo — verificar el primer `refresco ok` en logs y **cerrar AUD-005**.
-Localmente todo funciona contra la CMF real.
+**⚠️ Lo único cojo: el egress TCP en prod (AUD-005 / T-004).** La red de contenedores de
+VibeNest no sale → el scheduler no alcanza a la CMF **y los webhooks de alertas tampoco salen**
+(mismo camino); ticket enviado (2026-07-10). Los datos de prod se sembraron por la consola SQL
+del panel (receta en `docs/DEPLOY.md`) y envejecen 1 día/día hasta que VibeNest arregle; cuando
+lo haga, el scheduler retoma solo — verificar el primer `refresco ok` en logs y **cerrar
+AUD-005**. Localmente TODO está verificado E2E contra la CMF real (incluido un cruce de alerta
+real entregado a un receptor local).
 
 **Lo que ya existe (no rehacer):**
 - **Fuente v1 = CMF oficial** (ADR-002 enmendado); API key verificada, vive en `.env` (gitignored,
@@ -82,12 +84,37 @@ Localmente todo funciona contra la CMF real.
   `internal/testdb.Acquire(t)` — jamás leyendo `FARO_TEST_DATABASE_URL` directo (`go test ./...`
   corre paquetes en paralelo y se pisan la BD compartida — T-003).
 
-**Fase 3 — Distribución (siguiente), alcance (SAD §13):** alertas por webhook (ADR-006, tabla
-`alerts` ya migrada, validación anti-SSRF de `webhook_url` — SAD §8), widgets embebibles
-(ADR-007), rate limiting + CORS (ADR-010). Pendientes que la tocan: **AUD-005** (refresco en
-prod bloqueado por T-004 — verificar y cerrar apenas VibeNest arregle), CASE-002 (observar un
-fin de semana real en `sync_runs`), CASE-004 (hora del ticker con evidencia — bloqueada por
-AUD-005).
+**Lo nuevo de Fase 3 (no rehacer):**
+- **Alertas por webhook** (ADR-006): `POST /api/alerts` (registro sin login → token opaco
+  crypto/rand de 64 hex, único handle), `GET`/`DELETE /api/alerts/{token}`. Semántica de
+  **cruce** (edge-triggered — CASE-007 y sus 3 bordes: se-mantiene, ciclo-sin-cambios,
+  corrección histórica). Evaluador en `internal/alert` (implementa `refresh.Notifier`; el
+  scheduler le entrega SOLO los snapshots que cambiaron, con `context.WithoutCancel` para que
+  un SIGTERM no aborte un POST en vuelo). Sin reintentos ni auto-disable (AUD-006). Migración
+  002: índice único del token.
+- **Anti-SSRF en `internal/webhook`** (SAD §8; postura completa en `docs/SECURITY.md`, que nace
+  en esta fase): 2 capas — `ValidateURL` al registrar + dial pineado a la IP validada al
+  despachar (mata DNS rebinding); sin proxy del entorno, sin redirects. Escape SOLO dev:
+  `FARO_WEBHOOK_ALLOW_PRIVATE=1` (el boot lo grita en el log).
+- **Widget embebible** (ADR-007): `GET /widget/{code}` en `internal/web` — mini-card HTML
+  autocontenida (sin JS, claro/oscuro), `Cache-Control` 5 min, jamás X-Frame-Options. Snippets
+  (iframe + fetch) en el README; link por tarjeta en el dashboard.
+- **Rate limiting** (ADR-010): `internal/ratelimit`, token bucket por IP a mano (stdlib,
+  ADR-004): 5 req/s, ráfaga 30, mapa acotado a 4096 IPs. IP = última entrada de
+  X-Forwarded-For (la escribe el proxy de la plataforma). Envuelve todo en `cmd/faro` salvo
+  `/healthz`. 429 JSON + Retry-After.
+- **CORS abierto** en `/api/*` (middleware en `internal/api`, preflight OPTIONS → 204) y
+  **`/healthz`** en `cmd/faro` (ping a Postgres → 200/503; catch-up del SAD §8).
+- **Ruteo con trampa:** `GET /api/alerts/{token}` conflictúa con `GET /api/{code}/history` en un
+  mismo ServeMux (ambos matchean `/api/alerts/history` → panic al registrar); las alertas viven
+  en un sub-mux tras el prefijo literal `/api/alerts` — ver comentario en `api.Handler()`.
+- **Contrato interno cambiado:** `store.UpsertSnapshots` devuelve `[]indicator.Snapshot` (los
+  que cambiaron), no un conteo — esa es la señal que gatilla la evaluación de alertas.
+
+**Pendientes:** **AUD-005** (egress en prod: bloquea refresco + webhooks — verificar y cerrar
+apenas VibeNest arregle), **AUD-006** (reintentos/auto-disable de webhooks — Fase 4, con
+tracción), CASE-002 (observar un fin de semana real en `sync_runs`), CASE-004 (hora del ticker
+con evidencia — bloqueada por AUD-005).
 
 ## Comandos (una vez con Go instalado)
 | Acción | Comando |
@@ -104,6 +131,7 @@ AUD-005).
 | BD de tests (una vez) | `docker exec faro-pg createdb -U faro faro_test` |
 | Imagen Docker | `docker build -t faro .` (scratch, ~19 MB) |
 | Seed de prod (contingencia T-004) | receta en `docs/DEPLOY.md` (dump idempotente → consola SQL del panel) |
+| E2E de alertas en local | correr con `FARO_WEBHOOK_ALLOW_PRIVATE=1` + receptor loopback (docs/SECURITY.md; SOLO dev) |
 
 ## Arquitectura en una línea
 Un solo binario Go: **scheduler** (refresca 1×/día tras adapter → Postgres) + **API** (sirve de
@@ -113,9 +141,9 @@ Postgres + cache, nunca llama a la fuente en la request — ADR-003) + **dashboa
 ## Roadmap (SAD §13)
 - **Fase 0 — Cimientos: ✓ CERRADA** — gates + Go + scaffold + Postgres + adapter CMF testeado + CI.
 - **Fase 1 — Núcleo: ✓ CERRADA** — storage sqlc/pgx + scheduler + `sync_runs` + API (actual + histórico) + cache + CI con Postgres.
-- **Fase 2 — Dashboard + deploy: ✓ CERRADA** — migraciones al boot + dashboard con Chart.js + convertidor + backfill + Dockerfile scratch + **URL viva en VibeNest** (refresco en prod pendiente de plataforma, AUD-005). ← siguiente: Fase 3
-- **Fase 3 — Distribución:** alertas por webhook + widgets embebibles + rate limiting + CORS.
-- **Fase 4 — Robustez (solo con tracción):** mindicador.cl (y/o BCCh) como fallback de la CMF; docs OpenAPI; métricas.
+- **Fase 2 — Dashboard + deploy: ✓ CERRADA** — migraciones al boot + dashboard con Chart.js + convertidor + backfill + Dockerfile scratch + **URL viva en VibeNest** (refresco en prod pendiente de plataforma, AUD-005).
+- **Fase 3 — Distribución: ✓ CERRADA** — alertas por webhook (cruce + anti-SSRF 2 capas + token opaco) + widget embebible + rate limiting + CORS + `/healthz` + `docs/SECURITY.md`. Verificada E2E en local; en prod las alertas quedan latentes hasta el fix de AUD-005. ← siguiente: Fase 4 **solo con tracción**
+- **Fase 4 — Robustez (solo con tracción):** mindicador.cl (y/o BCCh) como fallback de la CMF; docs OpenAPI; métricas; reintentos/auto-disable de webhooks (AUD-006).
 
 ## Cierre de fase — Definition of Done (obligatorio, El Método §4 — 7 pasos, en orden)
 1. **Ronda crítica (vista de halcón)** — releer el código de la fase cazando bugs y casos borde.

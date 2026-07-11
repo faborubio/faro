@@ -97,14 +97,13 @@ func (f *fakeStore) Latest(ctx context.Context, code string) (indicator.Snapshot
 	return indicator.Snapshot{}, store.ErrNotFound
 }
 
-func (f *fakeStore) UpsertSnapshots(ctx context.Context, snaps []indicator.Snapshot) (int, error) {
+// UpsertSnapshots devuelve como "cambiados" los primeros changedPerUpsert
+// snapshots del lote (el contrato real: solo lo que insertó o corrigió valor).
+func (f *fakeStore) UpsertSnapshots(ctx context.Context, snaps []indicator.Snapshot) ([]indicator.Snapshot, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.upserted = append(f.upserted, snaps)
-	if f.upsertErr != nil {
-		return f.changedPerUpsert, f.upsertErr
-	}
-	return f.changedPerUpsert, nil
+	return snaps[:min(f.changedPerUpsert, len(snaps))], f.upsertErr
 }
 
 func (f *fakeStore) StartSyncRun(ctx context.Context, source string) (int64, error) {
@@ -376,6 +375,69 @@ func TestBackfillFallaParcial(t *testing.T) {
 	fin := st.lastFinish(t)
 	if fin.status != store.SyncError || !strings.Contains(fin.errMsg, "HTTP 500") {
 		t.Errorf("cierre = %+v, quiero status error con el detalle", fin)
+	}
+}
+
+type fakeNotifier struct {
+	mu    sync.Mutex
+	calls [][]indicator.Snapshot
+}
+
+func (f *fakeNotifier) ValuesChanged(ctx context.Context, changed []indicator.Snapshot) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, changed)
+}
+
+func TestNotifierRecibeSoloLosCambiados(t *testing.T) {
+	// De 2 snapshots solo 1 cambió: el notifier (alertas) recibe exactamente
+	// ese — sin valor nuevo no hay nada que evaluar (ADR-006 sobre ADR-011).
+	src := &fakeSource{snaps: []indicator.Snapshot{snap("uf", 40842.07), snap("dolar", 945.80)}}
+	st := &fakeStore{changedPerUpsert: 1}
+	n := &fakeNotifier{}
+	r := New(src, st, 0, nil).WithNotifier(n)
+
+	if err := r.RefreshOnce(context.Background()); err != nil {
+		t.Fatalf("RefreshOnce: %v", err)
+	}
+	if len(n.calls) != 1 || len(n.calls[0]) != 1 || n.calls[0][0].Code != "uf" {
+		t.Errorf("notifier recibió %v, quiero una llamada con solo el snapshot cambiado", n.calls)
+	}
+}
+
+func TestNotifierNoSeLlamaSinCambios(t *testing.T) {
+	src := &fakeSource{snaps: []indicator.Snapshot{snap("utm", 71649)}}
+	st := &fakeStore{changedPerUpsert: 0}
+	n := &fakeNotifier{}
+	r := New(src, st, 0, nil).WithNotifier(n)
+
+	if err := r.RefreshOnce(context.Background()); err != nil {
+		t.Fatalf("RefreshOnce: %v", err)
+	}
+	if len(n.calls) != 0 {
+		t.Errorf("notifier llamado %d veces sin cambios, quiero 0", len(n.calls))
+	}
+}
+
+func TestNotifierSeLlamaTrasCerrarElRun(t *testing.T) {
+	// Falla parcial: lo persistido igual se notifica, y siempre con el
+	// sync_run ya cerrado (las alertas no ensucian la salud de la fuente).
+	src := &fakeSource{
+		snaps: []indicator.Snapshot{snap("uf", 40842.07)},
+		err:   errors.New("ipc: la CMF respondió HTTP 500"),
+	}
+	st := &fakeStore{changedPerUpsert: 1}
+	n := &fakeNotifier{}
+	r := New(src, st, 0, nil).WithNotifier(n)
+
+	if err := r.RefreshOnce(context.Background()); err == nil {
+		t.Fatal("fuente a medias: quiero error")
+	}
+	if len(st.finished) != 1 {
+		t.Fatalf("sync_runs cerrados = %d, quiero 1", len(st.finished))
+	}
+	if len(n.calls) != 1 || len(n.calls[0]) != 1 {
+		t.Errorf("notifier recibió %v, quiero lo persistido pese a la falla parcial", n.calls)
 	}
 }
 

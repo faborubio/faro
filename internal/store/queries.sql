@@ -28,6 +28,17 @@ WHERE indicator_code = @indicator_code
   AND date <= @to_date
 ORDER BY date;
 
+-- name: PreviousValue :one
+-- El valor inmediatamente anterior a una fecha: la otra mitad de la semántica
+-- de cruce de las alertas (ADR-006) — se dispara cuando el valor nuevo
+-- satisface la condición y el anterior no.
+SELECT indicator_code, date, value
+FROM indicator_values
+WHERE indicator_code = @indicator_code
+  AND date < @date
+ORDER BY date DESC
+LIMIT 1;
+
 -- name: GetIndicator :one
 SELECT code, name, unit, description, cadence
 FROM indicators
@@ -37,6 +48,35 @@ WHERE code = @code;
 SELECT code, name, unit, description, cadence
 FROM indicators
 ORDER BY code;
+
+-- name: CreateAlert :one
+-- El token opaco lo genera la app (crypto/rand); la webhook_url llega ya
+-- validada (anti-SSRF, SAD §8). active nace true; el DELETE borra la fila.
+INSERT INTO alerts (token, indicator_code, operator, threshold, webhook_url)
+VALUES (@token, @indicator_code, @operator, @threshold, @webhook_url)
+RETURNING id, token, indicator_code, operator, threshold, webhook_url, active, last_triggered_at, created_at;
+
+-- name: GetAlertByToken :one
+SELECT id, token, indicator_code, operator, threshold, webhook_url, active, last_triggered_at, created_at
+FROM alerts
+WHERE token = @token;
+
+-- name: DeleteAlertByToken :execrows
+DELETE FROM alerts
+WHERE token = @token;
+
+-- name: ListActiveAlertsByCode :many
+-- Solo las activas: usa el índice parcial alerts_active_by_indicator.
+SELECT id, token, indicator_code, operator, threshold, webhook_url, active, last_triggered_at, created_at
+FROM alerts
+WHERE indicator_code = @indicator_code
+  AND active
+ORDER BY id;
+
+-- name: MarkAlertTriggered :exec
+UPDATE alerts
+SET last_triggered_at = now()
+WHERE id = @id;
 
 -- name: StartSyncRun :one
 INSERT INTO sync_runs (source, status)
