@@ -15,3 +15,4 @@ coverage.*
 # SO / editor
 .DS_Store
 *.swp
+.claude/
