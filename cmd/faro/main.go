@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -82,6 +83,18 @@ func run() error {
 
 	st := store.New(pool)
 	source := cmf.New(apiKey)
+	// CMF_BASE_URL (opcional) re-apunta el adapter a un proxy propio — la
+	// contingencia de T-004: la CMF es inalcanzable desde la IP del host de
+	// prod, pero el egress general funciona (receta del Worker en
+	// docs/DEPLOY.md). Sin la variable, va directo a la CMF.
+	if raw := os.Getenv("CMF_BASE_URL"); raw != "" {
+		u, err := url.Parse(raw)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("CMF_BASE_URL inválida: %q (se espera una URL http/https)", raw)
+		}
+		source.BaseURL = raw
+		slog.Warn("adapter CMF re-apuntado a un proxy (contingencia T-004)", "base_url", raw)
+	}
 
 	// Alertas (ADR-006): el scheduler notifica los valores que cambiaron y el
 	// evaluador dispara los webhooks que cruzan umbral. El escape de redes

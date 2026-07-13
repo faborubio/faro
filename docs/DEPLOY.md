@@ -39,6 +39,8 @@ el backfill termina.
 | `CMF_API_KEY` | sí | — | API key de la CMF (pedirla en `api.sbif.cl/api/contactanos.jsp`, T-002) |
 | `PORT` | no | `8080` | puerto del server HTTP |
 | `REFRESH_INTERVAL` | no | `24h` | intervalo del scheduler (formato Go) |
+| `CMF_BASE_URL` | no | API real de la CMF | contingencia T-004: re-apunta el adapter a un proxy propio (abajo) |
+| `FARO_WEBHOOK_ALLOW_PRIVATE` | no | apagado | SOLO dev: apaga el anti-SSRF de webhooks (docs/SECURITY.md) |
 
 ## VibeNest (Fase 2, paso 4 — deployado 2026-07-10)
 
@@ -76,3 +78,20 @@ una consola SQL web no entiende; (b) **el Postgres gestionado de prod es anterio
 `SET transaction_timeout` del preámbulo revienta con "unrecognized configuration parameter".
 Solo los `INSERT` importan (van calificados `public.…` y con `ON CONFLICT DO NOTHING`: pegar
 dos veces no duplica).
+
+### Plan A — proxy propio con `CMF_BASE_URL` (automatiza el refresco sin tocar la BD)
+
+El seed manual muere de raíz re-apuntando el adapter a un proxy que SÍ alcanza la CMF: el
+egress general del contenedor funciona, así que con esto el scheduler interno (refresco diario,
+backfill **y alertas**) vuelve a operar completo en prod. Pasos:
+
+1. **Worker de Cloudflare** (free tier): pegar `scripts/cmf-proxy-worker.js` en
+   dash.cloudflare.com → Workers → Create → Deploy. Solo reenvía GET hacia la raíz de recursos
+   de la CMF — no es un proxy abierto.
+2. **Smoke test del Worker:** `curl "https://<worker>.workers.dev/uf?apikey=<KEY>&formato=json"`
+   debe devolver el mismo JSON que la CMF directa.
+3. **En VibeNest:** Environment → `CMF_BASE_URL=https://<worker>.workers.dev` → redeploy. El
+   boot loguea un WARN visible: `adapter CMF re-apuntado a un proxy (contingencia T-004)`.
+4. **Verificar:** `refresco ok` en logs y `sync_runs` cerrando 'ok' de nuevo.
+5. **Al resolverse T-004:** borrar la variable del panel (y el Worker) — el adapter vuelve solo
+   a la CMF directa. No queda cicatriz en el código.

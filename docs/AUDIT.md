@@ -117,6 +117,12 @@ pago** (cómo y cuándo se salda).
      este escenario es exactamente para lo que se diseñó) o pedir a VibeNest un cambio de IP.
      El plan B del refresco externo (GitHub Actions cron) sigue viable: la CMF responde desde
      infra de EE.UU. (HTTP 422 sin key, 2026-07-13).
+- **Plan A dejado listo (2026-07-13):** `CMF_BASE_URL` opcional en el binario + Worker de
+  Cloudflare (`scripts/cmf-proxy-worker.js`, receta en `docs/DEPLOY.md`) — re-apunta el adapter
+  a un proxy propio que sí alcanza la CMF, y el scheduler completo (refresco + backfill +
+  alertas) vuelve a operar en prod sin exponer la BD ni tocar código. Sin la variable no cambia
+  nada. Activarlo es decisión operativa (requiere deployar Fase 3, hoy prod corre Fase 2);
+  esta entrada se cierra igual solo con el `refresco ok` — directo o vía proxy.
 
 ## AUD-006 — Webhooks sin reintentos ni auto-desactivación de receptores muertos
 - **Estado:** abierta (aceptada en Fase 3, 2026-07-10).

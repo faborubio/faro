@@ -37,6 +37,10 @@ mindicador.cl (ADR-002) o pedir cambio de IP. Los datos de prod (seed por consol
 `docs/DEPLOY.md`) envejecen 1 día/día; cuando la CMF vuelva a ser alcanzable el scheduler retoma
 solo — verificar el primer `refresco ok` y **cerrar AUD-005**. Localmente TODO está verificado
 E2E contra la CMF real (incluido un cruce de alerta entregado a un receptor local).
+**Plan A listo para activar:** `CMF_BASE_URL` (ENV opcional) re-apunta el adapter a un Worker
+de Cloudflare propio (`scripts/cmf-proxy-worker.js`, receta en `docs/DEPLOY.md` §Plan A) — con
+eso el scheduler completo vuelve a operar en prod sin seed manual. Requiere deployar Fase 3
+(prod aún corre el binario de Fase 2 — `/healthz` da 404) y crear el Worker en Cloudflare.
 
 **Lo que ya existe (no rehacer):**
 - **Fuente v1 = CMF oficial** (ADR-002 enmendado); API key verificada, vive en `.env` (gitignored,
