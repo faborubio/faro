@@ -106,6 +106,17 @@ pago** (cómo y cuándo se salda).
   desde la CMF **y el disparo de webhooks de alertas** (mismo camino de salida). Las alertas
   registradas en prod quedan latentes hasta el fix; localmente el ciclo completo está verificado
   E2E (cruce real → POST entregado).
+- **Re-diagnóstico (2026-07-13, respuesta de soporte — T-004 actualizado):** NO es egress
+  general: el contenedor y el host salen a internet sin problema; **solo las IPs de la CMF hacen
+  timeout desde ese host** (filtro de ruta o de IP de origen; la CMF responde desde Núremberg
+  AS24940 y desde EE.UU., así que no es ASN ni geo). Dos consecuencias:
+  1. Los **webhooks probablemente sí funcionan en prod** (destinos ≠ CMF) — confirmar con el
+     primer cruce real cuando el refresco vuelva, y recién entonces cerrar esta entrada completa.
+  2. Si el filtro resulta ser de la CMF contra la IP del host y no se destraba: el plan de pago
+     cambia de "esperar plataforma" a **adelantar el fallback mindicador.cl** (ADR-002/Fase 4 —
+     este escenario es exactamente para lo que se diseñó) o pedir a VibeNest un cambio de IP.
+     El plan B del refresco externo (GitHub Actions cron) sigue viable: la CMF responde desde
+     infra de EE.UU. (HTTP 422 sin key, 2026-07-13).
 
 ## AUD-006 — Webhooks sin reintentos ni auto-desactivación de receptores muertos
 - **Estado:** abierta (aceptada en Fase 3, 2026-07-10).

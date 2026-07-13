@@ -27,13 +27,16 @@ tracción real (SAD §13); mientras tanto, pagar pendientes (abajo) y observar u
 Repo público: `github.com/faborubio/faro` (remote HTTPS). SAD en 1.2.0.
 **URL pública viva: `https://faro.vibenest.net/`** (VibeNest sobre Coolify, Hetzner).
 
-**⚠️ Lo único cojo: el egress TCP en prod (AUD-005 / T-004).** La red de contenedores de
-VibeNest no sale → el scheduler no alcanza a la CMF **y los webhooks de alertas tampoco salen**
-(mismo camino); ticket enviado (2026-07-10). Los datos de prod se sembraron por la consola SQL
-del panel (receta en `docs/DEPLOY.md`) y envejecen 1 día/día hasta que VibeNest arregle; cuando
-lo haga, el scheduler retoma solo — verificar el primer `refresco ok` en logs y **cerrar
-AUD-005**. Localmente TODO está verificado E2E contra la CMF real (incluido un cruce de alerta
-real entregado a un receptor local).
+**⚠️ Lo único cojo: la CMF es inalcanzable desde el host de prod (AUD-005 / T-004).**
+Re-diagnóstico con soporte (2026-07-13): NO es egress general — el host y el contenedor salen a
+internet; **solo las IPs de la CMF hacen timeout desde ese host** (filtro de ruta/IP de origen:
+la CMF responde desde otros nodos Hetzner y desde EE.UU.). Soporte investiga con el proveedor;
+pidió no redeployar. Consecuencias: los **webhooks de alertas probablemente SÍ salen en prod**
+(por confirmar con el primer cruce real); si el filtro no se destraba, adelantar el fallback
+mindicador.cl (ADR-002) o pedir cambio de IP. Los datos de prod (seed por consola SQL, receta en
+`docs/DEPLOY.md`) envejecen 1 día/día; cuando la CMF vuelva a ser alcanzable el scheduler retoma
+solo — verificar el primer `refresco ok` y **cerrar AUD-005**. Localmente TODO está verificado
+E2E contra la CMF real (incluido un cruce de alerta entregado a un receptor local).
 
 **Lo que ya existe (no rehacer):**
 - **Fuente v1 = CMF oficial** (ADR-002 enmendado); API key verificada, vive en `.env` (gitignored,

@@ -61,3 +61,19 @@ Formato de cada entrada: **síntoma**, **causa raíz**, **fix**, y para los grav
   porque el "Client.Timeout exceeded while awaiting headers" de Go no distingue la fase del cuelgue
   (`79e928b`). Regla: **un adapter debe fallar diciendo la fase**; la censura de secretos se hace
   quirúrgica (la causa interna del `*url.Error` es segura), no total.
+- **Actualización (2026-07-13) — respuesta de soporte; el diagnóstico original queda REFUTADO en
+  su causa.** Nikita (VibeNest) reprodujo el timeout **desde el host de Hetzner mismo**: otros
+  endpoints HTTPS responden, pero **ambas IPs de la CMF hacen timeout** — el contenedor sí sale a
+  internet en general. No es NAT de Docker ni Traefik (que solo maneja tráfico entrante): es un
+  filtro de ruta o de IP de origen hacia ese destino puntual. Soporte investiga con el proveedor;
+  pidió **no redeployar todavía**. Evidencia triangulada:
+  - Núremberg AS24940 (mismo ASN de Hetzner, nodo de check-host) alcanzaba la CMF el 07-10 → no
+    es bloqueo por ASN/datacenter.
+  - Infra de EE.UU. (2026-07-13): la CMF responde **HTTP 422** (respuesta de aplicación — falta
+    la key en la URL) → el host es alcanzable desde el extranjero, no es geobloqueo.
+  - El host concreto de VibeNest: timeout solo hacia la CMF → el filtro apunta a **su IP/subred
+    específica** (típico de WAF anti-bot con listas de IPs), o a una ruta rota host↔CMF.
+- **Implicación importante para Fase 3:** como el egress general del contenedor funciona, los
+  **webhooks de alertas probablemente SÍ salen en prod** (van a receptores arbitrarios, no a la
+  CMF). Sin refresco no hay valores nuevos → no hay cruces → no se puede confirmar con un disparo
+  real hasta que la CMF sea alcanzable; queda "por confirmar con el primer cruce real".
