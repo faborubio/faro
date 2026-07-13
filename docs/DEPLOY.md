@@ -55,11 +55,24 @@ el backfill termina.
 5. Verificación: logs con `migraciones al día` + `backfill ok`, la URL sirviendo dashboard y
    `/api/{code}`, y `sync_runs` acumulando evidencia (CASE-002, CASE-004, AUD-004).
 
-**Incidente abierto (T-004):** el egress TCP de la red de contenedores del servidor
-(Hetzner-1-16Gb) está roto — la app no alcanza a la CMF (`dial tcp …:443: i/o timeout`) y el
-refresco diario falla; ticket enviado a VibeNest con la evidencia. **Workaround aplicado
-mientras tanto:** sembrar la BD por la consola SQL del panel (Storage → Open DB console) con
-un dump idempotente generado localmente (`pg_dump --data-only --rows-per-insert=250
---on-conflict-do-nothing` sobre una BD local recién backfilleada). Sin exponer puertos ni
-mover secretos. Cuando VibeNest arregle el egress, el scheduler interno retoma solo: no hay
-nada que revertir.
+**Incidente abierto (T-004, re-diagnosticado 2026-07-13):** la CMF es inalcanzable desde la IP
+del host (Hetzner-1-16Gb) — no es egress general; detalle y evidencia en `TROUBLESHOOTING.md`.
+El refresco diario falla; ticket con VibeNest en curso. **Workaround mientras tanto:** sembrar
+la BD por la consola SQL del panel (Storage → Open DB console) con un dump idempotente generado
+localmente sobre una BD local recién backfilleada (TRUNCATE de `indicator_values` + boot del
+binario). Sin exponer puertos ni mover secretos. Cuando la CMF vuelva a ser alcanzable, el
+scheduler interno retoma solo: no hay nada que revertir.
+
+Receta del dump (aprendizajes de los seeds del 07-10 y 07-13):
+
+```sh
+docker exec faro-pg pg_dump -U faro -d faro --data-only --rows-per-insert=250 \
+    --on-conflict-do-nothing -t indicator_values \
+  | grep -v -e '^SET ' -e '^SELECT pg_catalog.set_config' -e '^\\' > seed.sql
+```
+
+El `grep -v` es obligatorio: (a) pg_dump ≥ 17.6 emite `\restrict`, un meta-comando de psql que
+una consola SQL web no entiende; (b) **el Postgres gestionado de prod es anterior a 17** — el
+`SET transaction_timeout` del preámbulo revienta con "unrecognized configuration parameter".
+Solo los `INSERT` importan (van calificados `public.…` y con `ON CONFLICT DO NOTHING`: pegar
+dos veces no duplica).
