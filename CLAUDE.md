@@ -27,20 +27,23 @@ tracción real (SAD §13); mientras tanto, pagar pendientes (abajo) y observar u
 Repo público: `github.com/faborubio/faro` (remote HTTPS). SAD en 1.2.0.
 **URL pública viva: `https://faro.vibenest.net/`** (VibeNest sobre Coolify, Hetzner).
 
-**⚠️ Lo único cojo: la CMF es inalcanzable desde el host de prod (AUD-005 / T-004).**
-Re-diagnóstico con soporte (2026-07-13): NO es egress general — el host y el contenedor salen a
-internet; **solo las IPs de la CMF hacen timeout desde ese host** (filtro de ruta/IP de origen:
-la CMF responde desde otros nodos Hetzner y desde EE.UU.). Soporte investiga con el proveedor;
-pidió no redeployar. Consecuencias: los **webhooks de alertas probablemente SÍ salen en prod**
-(por confirmar con el primer cruce real); si el filtro no se destraba, adelantar el fallback
-mindicador.cl (ADR-002) o pedir cambio de IP. Los datos de prod (seed por consola SQL, receta en
-`docs/DEPLOY.md`) envejecen 1 día/día; cuando la CMF vuelva a ser alcanzable el scheduler retoma
-solo — verificar el primer `refresco ok` y **cerrar AUD-005**. Localmente TODO está verificado
-E2E contra la CMF real (incluido un cruce de alerta entregado a un receptor local).
-**Plan A listo para activar:** `CMF_BASE_URL` (ENV opcional) re-apunta el adapter a un Worker
-de Cloudflare propio (`scripts/cmf-proxy-worker.js`, receta en `docs/DEPLOY.md` §Plan A) — con
-eso el scheduler completo vuelve a operar en prod sin seed manual. Requiere deployar Fase 3
-(prod aún corre el binario de Fase 2 — `/healthz` da 404) y crear el Worker en Cloudflare.
+**🟢 Fase 3 DEPLOYADA en prod (2026-07-13) y refresco automatizado vía proxy (Plan A ACTIVO).**
+T-004 re-diagnosticado con soporte: NO es egress general — solo las IPs de la CMF hacen timeout
+desde la IP del host (filtro de ruta/IP de origen; la CMF responde desde otros nodos Hetzner y
+desde EE.UU.). Ticket sigue abierto con Nikita (VibeNest). **Contingencia activa:** Worker de
+Cloudflare `https://cmf-proxy.fabian-rubiocs.workers.dev` (código en
+`scripts/cmf-proxy-worker.js`) + `CMF_BASE_URL` en el Environment del panel → el scheduler
+completo (refresco, backfill, alertas) opera vía proxy. Boot de prod verificado: migración 002
+aplicada, WARN del proxy en el log, `/healthz` 200, widget y rutas de alertas vivas, datos al
+2026-07-13.
+
+**⏳ PRIMERA TAREA de la próxima sesión: cerrar AUD-005.** El tick corre cada 24 h desde el
+boot (próximo ~19:50 UTC del 2026-07-14). Verificar con
+`curl https://faro.vibenest.net/api/dolar` que aparezca el valor del **2026-07-14** solo —
+esa es la evidencia de que el refresco automático quedó operativo; cerrarla en `docs/AUDIT.md`.
+Queda residual: **retirar el Worker y la variable cuando VibeNest arregle la ruta** (T-004) —
+la retirada está en `docs/DEPLOY.md` §Plan A, paso 5. Los webhooks de alertas quedaron
+plenamente operativos en prod (el cruce real se confirmará cuando ocurra uno).
 
 **Lo que ya existe (no rehacer):**
 - **Fuente v1 = CMF oficial** (ADR-002 enmendado); API key verificada, vive en `.env` (gitignored,

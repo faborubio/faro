@@ -117,12 +117,16 @@ pago** (cómo y cuándo se salda).
      este escenario es exactamente para lo que se diseñó) o pedir a VibeNest un cambio de IP.
      El plan B del refresco externo (GitHub Actions cron) sigue viable: la CMF responde desde
      infra de EE.UU. (HTTP 422 sin key, 2026-07-13).
-- **Plan A dejado listo (2026-07-13):** `CMF_BASE_URL` opcional en el binario + Worker de
-  Cloudflare (`scripts/cmf-proxy-worker.js`, receta en `docs/DEPLOY.md`) — re-apunta el adapter
-  a un proxy propio que sí alcanza la CMF, y el scheduler completo (refresco + backfill +
-  alertas) vuelve a operar en prod sin exponer la BD ni tocar código. Sin la variable no cambia
-  nada. Activarlo es decisión operativa (requiere deployar Fase 3, hoy prod corre Fase 2);
-  esta entrada se cierra igual solo con el `refresco ok` — directo o vía proxy.
+- **Plan A ACTIVADO (2026-07-13):** Worker `https://cmf-proxy.fabian-rubiocs.workers.dev`
+  deployado (código en `scripts/cmf-proxy-worker.js`; smoke test: los 4 indicadores fluyen con
+  datos correctos, POST bloqueado 405) + `CMF_BASE_URL` en el Environment del panel + redeploy
+  — que de paso subió **Fase 3 a prod** (migración 002 aplicada al boot, `/healthz` 200, widget
+  y alertas vivos). El boot logueó el WARN del proxy como corresponde. Los webhooks de alertas
+  quedaron plenamente operativos (destinos ≠ CMF nunca estuvieron bloqueados).
+- **Cierre pendiente de UNA verificación:** que el tick de ~19:50 UTC del 2026-07-14 traiga el
+  valor del martes solo (`/api/dolar` con fecha 2026-07-14). Con eso el refresco automático
+  queda demostrado y esta entrada se cierra. Residual (vive en T-004/DEPLOY §Plan A): retirar
+  Worker + variable cuando VibeNest arregle la ruta original.
 
 ## AUD-006 — Webhooks sin reintentos ni auto-desactivación de receptores muertos
 - **Estado:** abierta (aceptada en Fase 3, 2026-07-10).

@@ -77,3 +77,8 @@ Formato de cada entrada: **síntoma**, **causa raíz**, **fix**, y para los grav
   **webhooks de alertas probablemente SÍ salen en prod** (van a receptores arbitrarios, no a la
   CMF). Sin refresco no hay valores nuevos → no hay cruces → no se puede confirmar con un disparo
   real hasta que la CMF sea alcanzable; queda "por confirmar con el primer cruce real".
+- **Workaround definitivo mientras dure (2026-07-13):** activado el **Plan A** — Worker de
+  Cloudflare como proxy hacia la CMF + `CMF_BASE_URL` en el panel (receta y retirada en
+  `docs/DEPLOY.md` §Plan A). El scheduler completo volvió a operar en prod; el seed manual por
+  consola SQL queda obsoleto salvo que el Worker también falle. Este ticket sigue abierto solo
+  para la ruta original: al fix de VibeNest/Hetzner, retirar Worker + variable.

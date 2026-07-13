@@ -81,6 +81,11 @@ dos veces no duplica).
 
 ### Plan A — proxy propio con `CMF_BASE_URL` (automatiza el refresco sin tocar la BD)
 
+> **ACTIVADO el 2026-07-13:** Worker `https://cmf-proxy.fabian-rubiocs.workers.dev` (cuenta
+> Cloudflare del autor) + `CMF_BASE_URL` en el Environment del panel. El redeploy subió además
+> Fase 3 a prod. Mientras esté activo, el boot loguea el WARN del proxy. Al resolverse T-004:
+> paso 5 (retirada).
+
 El seed manual muere de raíz re-apuntando el adapter a un proxy que SÍ alcanza la CMF: el
 egress general del contenedor funciona, así que con esto el scheduler interno (refresco diario,
 backfill **y alertas**) vuelve a operar completo en prod. Pasos:
